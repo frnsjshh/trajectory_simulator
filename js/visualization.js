@@ -27,23 +27,27 @@
     const prepared = prepareCanvas(canvas);
     if (!prepared) return null;
     const { context: ctx, width, height } = prepared;
-    const { model, time = 0, state = 'READY', previousState = 'READY', progress = 0, planeProgress = 0, releasePlaneProgress = 0, trajectoryVisible = true, sensorsVisible = true, planeImage = null, packageImage = null, impactTime = 0 } = frame;
+    const { model, time = 0, state = 'READY', previousState = 'READY', planeDistance = 0, releasePlaneDistance = 0, trajectoryVisible = true, sensorsVisible = true, sensorLabelsVisible = false, landingVisible = true, windIndicatorsVisible = false, parameters = {}, packagePosition = { x: 0, y: 0 }, planeImage = null, packageImage = null, impactTime = 0 } = frame;
     const visualState = state === 'PAUSED' ? previousState : state;
     const coefficients = model?.coefficients || [0, 0, 0];
-    const rootX = model?.roots?.positiveRoot;
-    const sensorPoints = model?.points || [];
-    const domain = rootX && Number.isFinite(rootX) ? rootX : Math.max(3, ...sensorPoints.map((point) => point.x).filter((value) => value > 0));
-    const anchoredProgress = visualState === 'FALLING' || visualState === 'LANDED' ? releasePlaneProgress : planeProgress;
-    const originX = width * (0.13 + Math.min(.13, anchoredProgress * .12));
-    const plotWidth = Math.max(1, width - originX - width * .13);
-    const xScale = plotWidth / Math.max(domain, .001);
-    const yTop = height * .18;
+    const landingX = Number.isFinite(model?.landingX) ? model.landingX : model?.roots?.positiveRoot;
+    const range = Number.isFinite(landingX) ? Math.abs(landingX) : 0;
+    const sensorPoints = model?.scenePoints || model?.points || [];
+    const released = visualState === 'FALLING' || visualState === 'LANDED';
+    const left = width * .1;
+    const right = width * .9;
+    const plotWidth = Math.max(1, right - left);
+    const visualDomain = Math.max(range, Number(parameters.aircraftSpeed || 0) * Number(model?.flightTime || 1) * .6, 30);
+    const xScale = plotWidth / (visualDomain * 1.15);
+    const flightSpan = range * xScale;
+    const laneWidth = Math.max(18, plotWidth - flightSpan);
+    const laneStart = left + (landingX < 0 ? flightSpan : 0);
+    const anchorDistance = released ? releasePlaneDistance : planeDistance;
+    const originX = laneStart + positiveModulo(anchorDistance * xScale, laneWidth);
+    const yTop = height * .14;
     const groundY = height * .82;
-    const maxAltitude = Math.max(1, coefficients[0], ...sensorPoints.map((point) => point.y), ...Array.from({ length: 13 }, (_, index) => {
-      const x = domain * index / 12;
-      return coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
-    }));
-    const yScale = (groundY - yTop) / (maxAltitude * 1.16);
+    const maxAltitude = Math.max(200, coefficients[0], ...sensorPoints.map((point) => point.y));
+    const yScale = (groundY - yTop) / (maxAltitude * 1.08);
     const mapX = (x) => originX + x * xScale;
     const mapY = (y) => groundY - y * yScale;
     const sky = ctx.createLinearGradient(0, 0, 0, height);
@@ -64,6 +68,7 @@
     drawClouds(ctx, width, height, time);
     drawRidge(ctx, width, height, time, .64, '#769c99', .0022, 0);
     drawRidge(ctx, width, height, time, .73, '#567c76', .0036, 1);
+    if (windIndicatorsVisible && parameters.windSpeed > 0) drawWindIndicators(ctx, width, height, time, parameters.windDirection, parameters.windSpeed);
 
     const groundGradient = ctx.createLinearGradient(0, groundY, 0, height);
     groundGradient.addColorStop(0, '#547a56');
@@ -75,7 +80,7 @@
     ctx.fillRect(0, groundY, width, 2);
     drawGrass(ctx, width, groundY, height, time);
 
-    if (trajectoryVisible && rootX && Number.isFinite(rootX)) {
+    if (trajectoryVisible && Number.isFinite(landingX)) {
       ctx.save();
       ctx.beginPath();
       ctx.setLineDash([4, 6]);
@@ -84,8 +89,10 @@
       ctx.shadowColor = 'rgba(48,221,210,.48)';
       ctx.shadowBlur = 7;
       for (let index = 0; index <= 90; index += 1) {
-        const x = rootX * index / 90;
-        const y = coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
+        const progress = index / 90;
+        const x = model.basis === 'time' ? 0 : landingX * progress;
+        const modelX = model.basis === 'time' ? model.landingTime * progress : x;
+        const y = index === 90 ? 0 : coefficients[0] + modelX * (coefficients[1] + coefficients[2] * modelX);
         if (index === 0) ctx.moveTo(mapX(x), mapY(y));
         else ctx.lineTo(mapX(x), mapY(y));
       }
@@ -94,8 +101,7 @@
     }
 
     if (sensorsVisible) {
-      sensorPoints.forEach(({ x, y }) => {
-        if (x < 0 || x > domain * 1.02) return;
+      sensorPoints.forEach(({ x, y }, index) => {
         const px = mapX(x);
         const py = mapY(y);
         ctx.beginPath();
@@ -105,20 +111,24 @@
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = 'rgba(40,52,48,.65)';
         ctx.stroke();
+        if (sensorLabelsVisible) {
+          ctx.fillStyle = '#fff1d9';
+          ctx.font = '8px "DM Mono", monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(`S${index + 1}`, px + 6, py - 6);
+        }
       });
     }
 
-    if (rootX && Number.isFinite(rootX)) drawTarget(ctx, mapX(rootX), groundY, time);
+    if (landingVisible && Number.isFinite(landingX)) drawTarget(ctx, mapX(landingX), groundY, time);
 
-    const released = visualState === 'FALLING' || visualState === 'LANDED';
-    const packageProgress = released ? Math.min(1, Math.max(0, progress)) : 0;
-    const packageX = released && rootX ? rootX * packageProgress : 0;
-    const packageY = released && rootX ? (packageProgress >= 1 ? 0 : coefficients[0] + packageX * (coefficients[1] + coefficients[2] * packageX)) : coefficients[0];
-    const planeTravel = released && rootX ? Math.min(plotWidth * .72, Math.max(0, planeProgress - releasePlaneProgress) * rootX * .75) : 0;
-    const planeX = originX + planeTravel;
-    const planeY = mapY(coefficients[0]) - 22;
+    const planeLaneWidth = Math.max(1, right - left);
+    const planeX = released
+      ? left + positiveModulo((originX - left) + (planeDistance - releasePlaneDistance) * xScale, planeLaneWidth)
+      : originX;
+    const planeY = mapY(model?.releaseAltitude ?? coefficients[0]) - 22;
 
-    if (!released && rootX && trajectoryVisible) {
+    if (!released && Number.isFinite(landingX) && trajectoryVisible) {
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,.55)';
       ctx.setLineDash([2, 4]);
@@ -132,11 +142,11 @@
     const propellerAngle = time * 22;
     drawAircraft(ctx, planeImage, planeX, planeY + Math.sin(time * 2.4) * 1.5, Math.min(1, width / 650), propellerAngle);
     if (!released) {
-      drawPackage(ctx, packageImage, originX + 2, mapY(coefficients[0]) + 12, 0, Math.min(1, width / 650));
-    } else if (rootX) {
-      const packagePixelX = mapX(packageX);
-      const packagePixelY = mapY(packageY) + (packageProgress < 1 ? 9 : -2);
-      if (trajectoryVisible && packageProgress < 1) {
+      drawPackage(ctx, packageImage, planeX - 18, mapY(model?.releaseAltitude ?? coefficients[0]) + 11, 0, Math.min(1, width / 650));
+    } else if (Number.isFinite(landingX)) {
+      const packagePixelX = mapX(packagePosition.x);
+      const packagePixelY = mapY(packagePosition.y) + (visualState === 'LANDED' ? -2 : 9);
+      if (trajectoryVisible && visualState !== 'LANDED') {
         ctx.save();
         ctx.strokeStyle = 'rgba(255,245,219,.4)';
         ctx.setLineDash([2, 4]);
@@ -146,7 +156,7 @@
         ctx.stroke();
         ctx.restore();
       }
-      if (packageProgress < 1) drawPackage(ctx, packageImage, packagePixelX, packagePixelY, progress * .45, Math.min(1, width / 650));
+      if (visualState !== 'LANDED') drawPackage(ctx, packageImage, packagePixelX, packagePixelY, time * .7, Math.min(1, width / 650));
       else drawImpact(ctx, packagePixelX, groundY, time - impactTime);
     }
 
@@ -162,7 +172,34 @@
       ctx.fillText('Ⅱ  PAUSED', width / 2, 32);
     }
 
-    return { originX, groundY, xScale, yScale, mapX, mapY, rootX };
+    return { originX, groundY, xScale, yScale, mapX, mapY, landingX };
+  }
+
+  function positiveModulo(value, divisor) {
+    return ((value % divisor) + divisor) % divisor;
+  }
+
+  function drawWindIndicators(ctx, width, height, time, direction, speed) {
+    const sign = direction === 'headwind' ? -1 : 1;
+    const span = width + 60;
+    const phase = positiveModulo(time * (12 + speed * 2) * sign, span);
+    for (let index = 0; index < 4; index += 1) {
+      const x = positiveModulo(phase + index * width / 4, span) - 30;
+      const y = height * (.28 + index % 2 * .12);
+      const arrow = sign * 11;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(34,112,137,.55)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(x - arrow, y);
+      ctx.lineTo(x + arrow, y);
+      ctx.moveTo(x + arrow, y);
+      ctx.lineTo(x + arrow - sign * 5, y - 4);
+      ctx.moveTo(x + arrow, y);
+      ctx.lineTo(x + arrow - sign * 5, y + 4);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   function drawClouds(ctx, width, height, time) {
@@ -395,11 +432,17 @@
     const { context: ctx, width, height } = prepared;
     const points = model?.points || [];
     const coefficients = model?.coefficients || [0, 0, 0];
-    const landing = model?.roots?.positiveRoot;
-    const maxSensorX = Math.max(0, ...points.map((point) => point.x));
-    const xMax = Math.max(landing || 0, maxSensorX, 1) * 1.12;
+    const landing = model?.basis === 'time'
+      ? model.landingTime
+      : Number.isFinite(model?.landingX) ? model.landingX : model?.roots?.positiveRoot;
+    const xValues = [0, landing, ...points.map((point) => point.x)].filter(Number.isFinite);
+    const rawMinX = Math.min(...xValues);
+    const rawMaxX = Math.max(...xValues);
+    const xPadding = Math.max(.5, (rawMaxX - rawMinX) * .1);
+    const xMin = rawMinX - xPadding;
+    const xMax = rawMaxX + xPadding;
     const samples = Array.from({ length: 81 }, (_, index) => {
-      const x = xMax * index / 80;
+      const x = xMin + (xMax - xMin) * index / 80;
       return coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
     });
     const minY = Math.min(0, ...points.map((point) => point.y), ...samples);
@@ -411,7 +454,7 @@
     const right = width - 9;
     const top = 7;
     const bottom = height - 23;
-    const mapX = (x) => left + x / xMax * (right - left);
+    const mapX = (x) => left + (x - xMin) / (xMax - xMin) * (right - left);
     const mapY = (y) => bottom - (y - yMin) / (yMax - yMin) * (bottom - top);
 
     ctx.clearRect(0, 0, width, height);
@@ -432,7 +475,7 @@
       ctx.fillText(formatTick(y), left - 6, pixelY);
     }
     for (let index = 0; index <= 4; index += 1) {
-      const x = xMax * index / 4;
+      const x = xMin + (xMax - xMin) * index / 4;
       const pixelX = mapX(x);
       ctx.strokeStyle = 'rgba(168,195,204,.08)';
       ctx.beginPath();
@@ -458,7 +501,7 @@
     ctx.save();
     ctx.beginPath();
     for (let index = 0; index <= 140; index += 1) {
-      const x = xMax * index / 140;
+      const x = xMin + (xMax - xMin) * index / 140;
       const y = coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
       if (index === 0) ctx.moveTo(mapX(x), mapY(y));
       else ctx.lineTo(mapX(x), mapY(y));
@@ -474,16 +517,23 @@
     ctx.arc(mapX(0), mapY(coefficients[0]), 3, 0, Math.PI * 2);
     ctx.fillStyle = '#dffaf1';
     ctx.fill();
-    points.forEach(({ x, y }) => {
-      ctx.beginPath();
-      ctx.arc(mapX(x), mapY(y), 3.6, 0, Math.PI * 2);
-      ctx.fillStyle = COLORS.amber;
-      ctx.fill();
-      ctx.strokeStyle = '#392d25';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    });
-    if (landing !== null && landing !== undefined && landing >= 0 && landing <= xMax) {
+    if (options.sensorsVisible !== false) {
+      points.forEach(({ x, y }, index) => {
+        ctx.beginPath();
+        ctx.arc(mapX(x), mapY(y), 3.6, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.amber;
+        ctx.fill();
+        ctx.strokeStyle = '#392d25';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        if (options.sensorLabelsVisible) {
+          ctx.fillStyle = '#f9d5a5';
+          ctx.textAlign = 'left';
+          ctx.fillText(`S${index + 1}`, mapX(x) + 5, mapY(y) - 5);
+        }
+      });
+    }
+    if (options.landingVisible !== false && Number.isFinite(landing)) {
       ctx.beginPath();
       ctx.arc(mapX(landing), mapY(0), 4, 0, Math.PI * 2);
       ctx.fillStyle = COLORS.green;
@@ -492,7 +542,20 @@
       ctx.lineWidth = 1.5;
       ctx.stroke();
     }
-    return { mapX, mapY, xMax, yMin, yMax, left, right, top, bottom };
+    if (options.currentPosition && Number.isFinite(options.currentPosition.modelX)) {
+      ctx.beginPath();
+      ctx.arc(mapX(options.currentPosition.modelX), mapY(options.currentPosition.y), 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#f1fffa';
+      ctx.fill();
+      ctx.strokeStyle = COLORS.cyan;
+      ctx.lineWidth = 1.6;
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#8198a4';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(model?.axisLabel || 'horizontal distance (m)', right, height - 1);
+    return { mapX, mapY, xMin, xMax, yMin, yMax, left, right, top, bottom };
   }
 
   function formatTick(value) {

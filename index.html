@@ -25,7 +25,7 @@
         <div>
           <p class="eyebrow"><span class="eyebrow-line"></span> FIELD TEST  /  PROJECTILE MOTION</p>
           <h1>Drop with <span>precision.</span></h1>
-          <p class="intro-copy">Three altitude readings. One quadratic model. Watch linear algebra chart a safe landing.</p>
+          <p class="intro-copy">Aircraft physics generates the readings. Gauss–Jordan elimination reconstructs the path and predicts its landing.</p>
         </div>
         <div class="mission-pill"><span class="mission-icon">✳</span><span><b>MISSION 04</b><small>SUPPLY DROP · LIVE MODEL</small></span></div>
       </section>
@@ -44,6 +44,17 @@
             <div class="scene-legend"><span><i class="legend-curve"></i> Predicted path</span><span><i class="legend-point"></i> Sensor points</span></div>
           </div>
           <div class="flight-console">
+            <div class="parameter-controls" aria-label="Aircraft and wind parameters">
+              <label class="parameter-control" for="aircraftSpeedSlider"><span>AIRCRAFT SPEED</span><input id="aircraftSpeedSlider" type="range" min="5" max="120" step="1" value="60"><output id="aircraftSpeedValue" for="aircraftSpeedSlider">60 m/s</output></label>
+              <label class="parameter-control" for="altitudeSlider"><span>RELEASE ALTITUDE</span><input id="altitudeSlider" type="range" min="10" max="200" step="1" value="90"><output id="altitudeValue" for="altitudeSlider">90 m</output></label>
+              <div class="wind-controls">
+                <label class="switch-label wind-switch"><input id="windToggle" type="checkbox"><span class="switch"></span><span>Wind</span></label>
+                <label class="wind-speed-control" for="windSpeedSlider"><span>WIND</span><input id="windSpeedSlider" type="range" min="0" max="20" step="0.5" value="0" disabled><output id="windSpeedValue" for="windSpeedSlider">0 m/s</output></label>
+                <select id="windDirection" aria-label="Wind direction" disabled><option value="tailwind">Tailwind</option><option value="headwind">Headwind</option></select>
+              </div>
+              <p class="physics-note">Educational model: constant horizontal wind velocity; drag is neglected.</p>
+              <p class="parameter-notice" id="parameterNotice" role="status" aria-live="polite"></p>
+            </div>
             <div class="button-row">
               <button class="button button-primary" id="startButton" type="button"><span class="button-icon">▶</span> Start simulation</button>
               <button class="button button-drop" id="dropButton" type="button" disabled><span class="button-icon">↓</span> Drop package</button>
@@ -54,52 +65,59 @@
             </div>
             <div class="flight-options">
               <label class="speed-control" for="speedSlider"><span>SIM SPEED</span><input id="speedSlider" type="range" min="0.25" max="2" step="0.25" value="1"><output id="speedValue" for="speedSlider">1.00×</output></label>
-              <label class="switch-label"><input id="trajectoryToggle" type="checkbox" checked><span class="switch"></span><span>Trajectory</span></label>
-              <label class="switch-label"><input id="sensorToggle" type="checkbox" checked><span class="switch"></span><span>Sensors</span></label>
+              <details class="visualization-menu"><summary>Visualization</summary><div class="visualization-options">
+                <label><input id="trajectoryToggle" type="checkbox" checked> Scene trajectory</label>
+                <label><input id="graphToggle" type="checkbox" checked> Trajectory plot</label>
+                <label><input id="matrixToggle" type="checkbox" checked> Matrix / Gauss–Jordan</label>
+                <label><input id="sensorToggle" type="checkbox" checked> Sensor markers</label>
+                <label><input id="sensorLabelsToggle" type="checkbox"> Sensor labels</label>
+                <label><input id="landingToggle" type="checkbox" checked> Landing marker</label>
+                <label><input id="windVisualToggle" type="checkbox"> Wind indicators</label>
+                <label><input id="resultsToggle" type="checkbox" checked> Equation and results</label>
+              </div></details>
               <label class="switch-label auto-drop"><input id="autoDropToggle" type="checkbox"><span class="switch"></span><span>Auto-drop</span></label>
             </div>
           </div>
         </div>
 
         <aside class="results-column" aria-label="Calculated flight results">
-          <article class="result-card panel">
+          <article class="result-card panel" id="resultPanel">
             <div class="card-head"><span class="section-kicker">02 / FLIGHT PREDICTION</span><span class="status-badge" id="solverBadge">SOLVED</span></div>
-            <div class="equation-block"><span class="result-label">TRAJECTORY MODEL</span><div class="equation" id="equationOutput">y = 45 − 5x²</div><div class="equation-note">altitude <i>y</i> · horizontal distance <i>x</i></div></div>
-            <div class="landing-result"><div><span class="result-label">PREDICTED LANDING</span><strong id="landingOutput">3.00 <small>m</small></strong></div><span class="landing-icon">↗</span></div>
+            <div class="equation-block"><span class="result-label">TRAJECTORY MODEL</span><div class="equation" id="equationOutput">y = 90 − 0.0013625x²</div><div class="equation-note" id="equationNote">altitude <i>y</i> · horizontal distance <i>x</i></div></div>
+            <div class="landing-result"><div><span class="result-label">PREDICTED LANDING</span><strong id="landingOutput">257.0 <small>m</small></strong><span class="landing-direction" id="landingDirection">right of release</span></div><span class="landing-icon">↗</span></div>
             <div class="coefficient-row">
-              <div><span>a₀</span><strong id="coefficientA0">45</strong></div><div><span>a₁</span><strong id="coefficientA1">0</strong></div><div><span>a₂</span><strong id="coefficientA2">−5</strong></div>
+              <div><span>a₀</span><strong id="coefficientA0">90</strong></div><div><span>a₁</span><strong id="coefficientA1">0</strong></div><div><span>a₂</span><strong id="coefficientA2">−0.0013625</strong></div>
             </div>
             <div class="result-footer"><span><i class="result-dot"></i><span id="resultStatus">Flight path valid</span></span><span><b id="sensorCount">3</b> sensors</span></div>
           </article>
 
-          <article class="graph-card panel">
+          <article class="graph-card panel" id="graphPanel">
             <div class="card-head"><div><span class="section-kicker">03 / TRAJECTORY PLOT</span><h2>Altitude profile</h2></div><span class="graph-unit">m <span>×</span> m</span></div>
             <div class="graph-wrap"><canvas id="trajectoryCanvas" aria-label="Graph of altitude versus horizontal distance"></canvas><div class="graph-tooltip" id="graphTooltip" role="status" hidden></div></div>
             <div class="graph-legend"><span><i class="graph-line-key"></i> Quadratic fit</span><span><i class="graph-sensor-key"></i> Sensors</span><span><i class="graph-ground-key"></i> Ground level</span></div>
+          </article>
+          <article class="panel math-panel" id="math-panel">
+            <div class="panel-title-row"><div><span class="section-kicker">04 / LINEAR ALGEBRA</span><h2>From readings to trajectory</h2><p class="panel-subtitle">Solve <span class="mono">AX = B</span> with Gauss–Jordan elimination.</p></div><span class="matrix-icon" aria-hidden="true">[ A ]</span></div>
+            <div class="matrix-topline"><div><span class="result-label">ORIGINAL AUGMENTED MATRIX <span>[A | B]</span></span><div class="matrix" id="originalMatrix" aria-label="Original augmented matrix"></div></div><div class="matrix-arrow" aria-hidden="true">→</div><div><span class="result-label">REDUCED ROW-ECHELON FORM</span><div class="matrix" id="rrefMatrix" aria-label="Reduced row-echelon form"></div></div></div>
+            <div class="operation-panel">
+              <div class="operation-head"><div><span class="result-label">ROW OPERATIONS</span><strong id="stepLabel">Step 1 of 1 · Starting augmented matrix</strong></div><span class="step-counter" id="stepCounter">01 / 01</span></div>
+              <div class="operation-current"><span class="operation-arrow">↳</span><code id="operationText">Initial matrix</code></div>
+              <div class="matrix step-matrix" id="stepMatrix" aria-label="Augmented matrix at the selected elimination step"></div>
+              <div class="operation-controls"><button class="mini-button" id="stepBack" type="button" aria-label="Previous matrix step">←</button><button class="mini-button play-step" id="playSteps" type="button"><span id="playStepsIcon">▶</span><span id="playStepsText">Play steps</span></button><button class="mini-button" id="stepForward" type="button" aria-label="Next matrix step">→</button><button class="mini-button mini-reset" id="resetSteps" type="button">Reset</button></div>
+            </div>
+            <div class="solution-strip"><span class="result-label">SOLUTION VECTOR <span>X = [ a₀  a₁  a₂ ]ᵀ</span></span><div id="solutionVector" class="solution-vector"><span>—</span></div></div>
           </article>
         </aside>
       </section>
 
       <section class="lower-grid">
-        <article class="panel math-panel" id="math-panel">
-          <div class="panel-title-row"><div><span class="section-kicker">04 / LINEAR ALGEBRA</span><h2>From readings to trajectory</h2><p class="panel-subtitle">Solve <span class="mono">AX = B</span> with Gauss–Jordan elimination.</p></div><span class="matrix-icon" aria-hidden="true">[ A ]</span></div>
-          <div class="matrix-topline"><div><span class="result-label">ORIGINAL AUGMENTED MATRIX <span>[A | B]</span></span><div class="matrix" id="originalMatrix" aria-label="Original augmented matrix"></div></div><div class="matrix-arrow" aria-hidden="true">→</div><div><span class="result-label">REDUCED ROW-ECHELON FORM</span><div class="matrix" id="rrefMatrix" aria-label="Reduced row-echelon form"></div></div></div>
-          <div class="operation-panel">
-            <div class="operation-head"><div><span class="result-label">ROW OPERATIONS</span><strong id="stepLabel">Step 1 of 1 · Starting augmented matrix</strong></div><span class="step-counter" id="stepCounter">01 / 01</span></div>
-            <div class="operation-current"><span class="operation-arrow">↳</span><code id="operationText">Initial matrix</code></div>
-            <div class="matrix step-matrix" id="stepMatrix" aria-label="Augmented matrix at the selected elimination step"></div>
-            <div class="operation-controls"><button class="mini-button" id="stepBack" type="button" aria-label="Previous matrix step">←</button><button class="mini-button play-step" id="playSteps" type="button"><span id="playStepsIcon">▶</span><span id="playStepsText">Play steps</span></button><button class="mini-button" id="stepForward" type="button" aria-label="Next matrix step">→</button><button class="mini-button mini-reset" id="resetSteps" type="button">Reset</button></div>
-          </div>
-          <div class="solution-strip"><span class="result-label">SOLUTION VECTOR <span>X = [ a₀  a₁  a₂ ]ᵀ</span></span><div id="solutionVector" class="solution-vector"><span>45</span><i>·</i><span>0</span><i>·</i><span>−5</span></div></div>
-        </article>
-
         <article class="panel sensor-panel">
-          <div class="panel-title-row"><div><span class="section-kicker">05 / SENSOR ARRAY</span><h2>Altitude readings</h2><p class="panel-subtitle">Three distinct positions define the quadratic.</p></div><span class="sensor-count-bubble" id="sensorCountBubble">03</span></div>
-          <div class="sensor-table-wrap"><table class="sensor-table"><thead><tr><th>Sensor</th><th><i>x</i> · distance (m)</th><th><i>y</i> · altitude (m)</th><th><span class="sr-only">Remove sensor</span></th></tr></thead><tbody id="sensorRows"></tbody></table></div>
+          <div class="panel-title-row"><div><span class="section-kicker">05 / SENSOR ARRAY</span><h2>Generated sensor readings</h2><p class="panel-subtitle" id="sensorModeDescription">Samples generated from the current aircraft and wind parameters.</p></div><div class="sensor-panel-tools"><span class="sensor-count-bubble" id="sensorCountBubble">03</span><label class="switch-label"><input id="manualModeToggle" type="checkbox"><span class="switch"></span><span>Manual mode</span></label></div></div>
+          <div class="sensor-table-wrap"><table class="sensor-table"><thead><tr><th>Sensor</th><th><i>x</i> <span id="sensorXAxisUnit">· distance (m)</span></th><th><i>y</i> · altitude (m)</th><th><span class="sr-only">Remove sensor</span></th></tr></thead><tbody id="sensorRows"></tbody></table></div>
           <div class="sensor-error" id="sensorError" role="alert" hidden></div>
-          <div class="sensor-actions"><button class="text-button" id="addSensor" type="button">＋ Add sensor</button><button class="text-button muted-link" id="loadSample" type="button">Load sample</button></div>
-          <div class="recalculate-row"><button class="button button-primary recalculate-button" id="recalculateButton" type="button">Recalculate model <span>↗</span></button><button class="reset-data" id="resetData" type="button">Reset default</button></div>
-          <div class="model-note"><span>i</span><p>Interpolation uses exactly three measurements. Add more only when preparing another three-point set.</p></div>
+          <div class="sensor-actions"><button class="text-button" id="addSensor" type="button" hidden>＋ Add sensor</button><button class="text-button muted-link" id="loadSample" type="button">Load sample data</button></div>
+          <div class="recalculate-row"><button class="button button-primary recalculate-button" id="recalculateButton" type="button" hidden>Recalculate model <span>↗</span></button><button class="reset-data" id="resetData" type="button">Use automatic sensors</button></div>
+          <div class="model-note"><span>i</span><p>Generated coordinates are sampled from constant-velocity projectile motion; the displayed curve is reconstructed by the custom solver. Manual interpolation is available for demonstrations.</p></div>
         </article>
       </section>
 

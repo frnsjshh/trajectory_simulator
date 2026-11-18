@@ -9,18 +9,17 @@
   'use strict';
 
   const DEFAULT_POINTS = [{ x: 0, y: 45 }, { x: 1, y: 40 }, { x: 2, y: 25 }];
-  const FLIGHT_DURATION = 3.2;
   const PRESENTATION = [
-    'Three altitude readings are ready. Each sensor contributes one equation to our model.',
+    'Aircraft speed, release altitude, gravity, and wind generate three altitude readings.',
     'For every measurement we build a row [1, x, x²]. The measured altitudes form the vector B.',
     'Gauss–Jordan elimination uses real row operations and partial pivoting to reduce the augmented matrix.',
-    'The solution vector supplies a₀, a₁, and a₂, which define the altitude at every horizontal distance.',
-    'We solve the polynomial for y = 0 and use its positive root as the predicted ground distance.',
+    'The solution vector supplies a₀, a₁, and a₂, which reconstruct the measured flight path.',
+    'We solve the polynomial for y = 0 and select the intercept in the package’s direction of travel.',
     'The crate now follows the same calculated curve, with the predicted ground point marked below.'
   ];
 
   function createSimulationState() {
-    return { status: 'READY', previousState: 'READY', progress: 0, planeProgress: 0, releasePlaneProgress: 0, flightElapsed: 0, time: 0, autoDropElapsed: 0, impactTime: 0 };
+    return { status: 'READY', previousState: 'READY', progress: 0, planeProgress: 0, releasePlaneProgress: 0, planeDistance: 0, releasePlaneDistance: 0, flightElapsed: 0, time: 0, autoDropElapsed: 0, impactTime: 0 };
   }
 
   function transitionSimulation(current, action) {
@@ -30,11 +29,14 @@
       state.status = 'FLYING';
       state.previousState = 'FLYING';
       state.planeProgress = 0;
+      state.planeDistance = 0;
+      state.releasePlaneDistance = 0;
       state.autoDropElapsed = 0;
     } else if (action === 'drop' && state.status === 'FLYING') {
       state.status = 'FALLING';
       state.previousState = 'FALLING';
       state.releasePlaneProgress = state.planeProgress;
+      state.releasePlaneDistance = state.planeDistance;
       state.progress = 0;
       state.flightElapsed = 0;
     } else if (action === 'land' && state.status === 'FALLING') {
@@ -56,21 +58,44 @@
     return state;
   }
 
+  function advanceSimulation(current, deltaSeconds, parameters, model, simulationSpeed = 1) {
+    const state = { ...current };
+    if (state.status === 'PAUSED') return state;
+    const elapsed = Math.max(0, Number.isFinite(deltaSeconds) ? deltaSeconds : 0) * Math.max(0, Number.isFinite(simulationSpeed) ? simulationSpeed : 1);
+    if (elapsed === 0) return state;
+    state.time += elapsed;
+    if (state.status === 'FLYING' || state.status === 'FALLING' || state.status === 'LANDED') {
+      const aircraftSpeed = Math.max(0, Number(parameters?.aircraftSpeed) || 0);
+      state.planeDistance += aircraftSpeed * elapsed;
+      state.planeProgress += elapsed;
+    }
+    if (state.status === 'FLYING') state.autoDropElapsed += elapsed;
+    if (state.status === 'FALLING') {
+      state.flightElapsed += elapsed;
+      const duration = Math.max(Number.EPSILON, Number(model?.flightTime) || 0);
+      state.progress = Math.min(1, state.flightElapsed / duration);
+      if (state.progress >= 1) return transitionSimulation(state, 'land');
+    }
+    return state;
+  }
+
   function init() {
     if (typeof document === 'undefined' || !document.getElementById('simulationCanvas')) return;
     const byId = (id) => document.getElementById(id);
     const elements = {
       sceneCanvas: byId('simulationCanvas'), graphCanvas: byId('trajectoryCanvas'), sceneWrap: byId('sceneWrap'),
       sceneStatus: byId('sceneStatus'), sceneAltitude: byId('sceneAltitude'), sceneScaleLabel: byId('sceneScaleLabel'),
-      hudLanding: byId('hudLanding'), equation: byId('equationOutput'), landing: byId('landingOutput'),
+      hudLanding: byId('hudLanding'), equation: byId('equationOutput'), equationNote: byId('equationNote'), landing: byId('landingOutput'), landingDirection: byId('landingDirection'),
       coefficientA0: byId('coefficientA0'), coefficientA1: byId('coefficientA1'), coefficientA2: byId('coefficientA2'),
       resultStatus: byId('resultStatus'), sensorCount: byId('sensorCount'), sensorCountBubble: byId('sensorCountBubble'),
       solverBadge: byId('solverBadge'), originalMatrix: byId('originalMatrix'), rrefMatrix: byId('rrefMatrix'), stepMatrix: byId('stepMatrix'),
       stepLabel: byId('stepLabel'), stepCounter: byId('stepCounter'), operationText: byId('operationText'), solutionVector: byId('solutionVector'),
-      sensorRows: byId('sensorRows'), sensorError: byId('sensorError'), graphTooltip: byId('graphTooltip'),
+      sensorRows: byId('sensorRows'), sensorError: byId('sensorError'), sensorModeDescription: byId('sensorModeDescription'), sensorXAxisUnit: byId('sensorXAxisUnit'), graphTooltip: byId('graphTooltip'),
       startButton: byId('startButton'), dropButton: byId('dropButton'), pauseButton: byId('pauseButton'), resumeButton: byId('resumeButton'),
       resetButton: byId('resetButton'), replayButton: byId('replayButton'), speedSlider: byId('speedSlider'), speedValue: byId('speedValue'),
-      trajectoryToggle: byId('trajectoryToggle'), sensorToggle: byId('sensorToggle'), autoDropToggle: byId('autoDropToggle'),
+      aircraftSpeedSlider: byId('aircraftSpeedSlider'), aircraftSpeedValue: byId('aircraftSpeedValue'), altitudeSlider: byId('altitudeSlider'), altitudeValue: byId('altitudeValue'),
+      windToggle: byId('windToggle'), windSpeedSlider: byId('windSpeedSlider'), windSpeedValue: byId('windSpeedValue'), windDirection: byId('windDirection'), parameterNotice: byId('parameterNotice'),
+      trajectoryToggle: byId('trajectoryToggle'), graphToggle: byId('graphToggle'), matrixToggle: byId('matrixToggle'), sensorToggle: byId('sensorToggle'), sensorLabelsToggle: byId('sensorLabelsToggle'), landingToggle: byId('landingToggle'), windVisualToggle: byId('windVisualToggle'), resultsToggle: byId('resultsToggle'), autoDropToggle: byId('autoDropToggle'), manualModeToggle: byId('manualModeToggle'),
       presentationToggle: byId('presentationToggle'), presentationStep: byId('presentationStep'), presentationText: byId('presentationText'),
       presentationProgress: byId('presentationProgress'), planeUpload: byId('planeUpload'), packageUpload: byId('packageUpload'),
       planePreview: byId('planePreview'), packagePreview: byId('packagePreview'), planePreviewLabel: byId('planePreviewLabel'),
@@ -82,7 +107,8 @@
     let flightReason = '';
     let simulation = createSimulationState();
     let stepIndex = 0;
-    let stepTimer = null;
+    let stepPlaybackActive = false;
+    let stepPlaybackElapsed = 0;
     let animationHandle = null;
     let previousFrameTime = null;
     let graphViewport = null;
@@ -103,14 +129,35 @@
       return Number.isFinite(value) ? value.toFixed(digits) : '—';
     }
 
-    function polynomialText(coefficients) {
+    function polynomialText(coefficients, variable = 'x') {
       const [a0, a1, a2] = coefficients;
       const terms = [formatNumber(a0)];
-      [[a1, 'x'], [a2, 'x²']].forEach(([coefficient, suffix]) => {
+      [[a1, variable], [a2, `${variable}²`]].forEach(([coefficient, suffix]) => {
         if (Math.abs(coefficient) < 1e-10) return;
         terms.push(`${coefficient < 0 ? '−' : '+'} ${formatNumber(Math.abs(coefficient))}${suffix}`);
       });
       return `y = ${terms.join(' ')}`;
+    }
+
+    function readParameters(elements) {
+      return {
+        aircraftSpeed: Number(elements.aircraftSpeedSlider.value),
+        altitude: Number(elements.altitudeSlider.value),
+        windEnabled: elements.windToggle.checked,
+        windSpeed: Number(elements.windSpeedSlider.value),
+        windDirection: elements.windDirection.value,
+        gravity: 9.81
+      };
+    }
+
+    function updateParameterReadouts(elements) {
+      elements.aircraftSpeedValue.value = `${Number(elements.aircraftSpeedSlider.value).toFixed(0)} m/s`;
+      elements.altitudeValue.value = `${Number(elements.altitudeSlider.value).toFixed(0)} m`;
+      elements.windSpeedValue.value = elements.windToggle.checked
+        ? `${Number(elements.windSpeedSlider.value).toFixed(1)} m/s`
+        : '0 m/s · OFF';
+      elements.windSpeedSlider.disabled = !elements.windToggle.checked;
+      elements.windDirection.disabled = !elements.windToggle.checked;
     }
 
     function clearError() {
@@ -131,7 +178,7 @@
       });
     }
 
-    function renderSensorRows(points) {
+    function renderSensorRows(points, editable = elements.manualModeToggle.checked) {
       elements.sensorRows.replaceChildren();
       points.forEach((point, index) => {
         const row = document.createElement('tr');
@@ -145,6 +192,7 @@
         xInput.step = 'any';
         xInput.inputMode = 'decimal';
         xInput.dataset.axis = 'x';
+        xInput.readOnly = !editable;
         xInput.setAttribute('aria-label', `Sensor ${index + 1} horizontal distance x`);
         xInput.value = Number.isFinite(point.x) ? String(point.x) : '';
         xCell.append(xInput);
@@ -155,6 +203,7 @@
         yInput.step = 'any';
         yInput.inputMode = 'decimal';
         yInput.dataset.axis = 'y';
+        yInput.readOnly = !editable;
         yInput.setAttribute('aria-label', `Sensor ${index + 1} altitude y`);
         yInput.value = Number.isFinite(point.y) ? String(point.y) : '';
         yCell.append(yInput);
@@ -163,6 +212,7 @@
         removeButton.className = 'remove-sensor';
         removeButton.type = 'button';
         removeButton.dataset.removeIndex = String(index);
+        removeButton.hidden = !editable;
         removeButton.setAttribute('aria-label', `Remove sensor ${index + 1}`);
         removeButton.textContent = '×';
         removeCell.append(removeButton);
@@ -203,19 +253,23 @@
     }
 
     function makeFlightVerdict(nextModel) {
-      const rootX = nextModel.roots.positiveRoot;
-      if (rootX === null || !Number.isFinite(rootX)) return { valid: false, reason: nextModel.roots.reason || 'No positive landing distance.' };
+      const rootX = Number.isFinite(nextModel.landingX) ? nextModel.landingX : nextModel.roots.positiveRoot;
+      if (rootX === null || !Number.isFinite(rootX)) return { valid: false, reason: nextModel.roots.reason || 'No forward landing point.' };
       if (nextModel.coefficients[0] <= 0) return { valid: false, reason: 'Release altitude must be above ground level.' };
       for (let index = 1; index <= 30; index += 1) {
-        const altitude = math.evaluate(nextModel.coefficients, rootX * index / 30);
+        const progress = index / 30;
+        const x = nextModel.basis === 'time'
+          ? (nextModel.landingTime || nextModel.flightTime) * progress
+          : rootX * progress;
+        const altitude = math.evaluate(nextModel.coefficients, x);
         if (altitude < -1e-8) return { valid: false, reason: 'The fitted path crosses below ground before its predicted landing.' };
       }
-      return { valid: true, reason: 'Flight path valid' };
+      return { valid: true, reason: nextModel.basis === 'time' ? 'Vertical drop · time basis' : 'Flight path valid' };
     }
 
     function stopStepPlayback() {
-      if (stepTimer !== null) window.clearInterval(stepTimer);
-      stepTimer = null;
+      stepPlaybackActive = false;
+      stepPlaybackElapsed = 0;
       byId('playStepsIcon').textContent = '▶';
       byId('playStepsText').textContent = 'Play steps';
     }
@@ -240,26 +294,64 @@
     }
 
     function renderModel() {
-      const points = readSensorRows();
+      const manualMode = elements.manualModeToggle.checked;
+      const parameters = readParameters(elements);
+      const generatedModel = manualMode ? null : math.generatePhysicsModel(parameters);
+      let points;
+      if (manualMode) points = readSensorRows();
+      else points = generatedModel.points;
       sensorPoints = points;
-      renderSensorRows(points);
+      renderSensorRows(points, manualMode);
+      elements.sensorModeDescription.textContent = manualMode
+        ? 'Edit three points to explore interpolation independently of the flight settings.'
+        : 'Samples are generated from aircraft speed, altitude, gravity, and wind.';
+      byId('addSensor').hidden = !manualMode;
+      byId('recalculateButton').hidden = !manualMode;
+      byId('loadSample').hidden = !manualMode;
       try {
-        const nextModel = math.fitQuadratic(points);
+        let nextModel;
+        if (manualMode) {
+          const fitted = math.fitQuadratic(points);
+          const flightTime = Math.sqrt(2 * Math.max(fitted.coefficients[0], 0) / parameters.gravity);
+          const landingX = fitted.roots.positiveRoot;
+          nextModel = {
+            ...fitted,
+            basis: 'distance',
+            axisLabel: 'horizontal distance (m)',
+            releaseAltitude: fitted.coefficients[0],
+            flightTime,
+            landingTime: flightTime,
+            landingX,
+            landingDistance: landingX === null ? null : Math.abs(landingX),
+            effectiveHorizontalSpeed: flightTime > 0 && landingX !== null ? landingX / flightTime : parameters.aircraftSpeed,
+            scenePoints: points.map((point) => ({ ...point })),
+            isManual: true
+          };
+        } else {
+          nextModel = generatedModel;
+        }
         model = nextModel;
         const verdict = makeFlightVerdict(model);
         flightValid = verdict.valid;
         flightReason = verdict.reason;
-        elements.equation.textContent = polynomialText(model.coefficients);
+        elements.equation.textContent = polynomialText(model.coefficients, model.basis === 'time' ? 't' : 'x');
         elements.coefficientA0.textContent = formatNumber(model.coefficients[0]);
         elements.coefficientA1.textContent = formatNumber(model.coefficients[1]);
         elements.coefficientA2.textContent = formatNumber(model.coefficients[2]);
-        elements.landing.textContent = model.roots.positiveRoot === null ? '—' : `${formatFixed(model.roots.positiveRoot)} m`;
-        elements.hudLanding.innerHTML = model.roots.positiveRoot === null ? '—' : `${formatFixed(model.roots.positiveRoot)} <small>m</small>`;
+        const landingX = model.landingX ?? model.roots.positiveRoot;
+        const landingDistance = Number.isFinite(model.landingDistance) ? model.landingDistance : landingX === null ? null : Math.abs(landingX);
+        elements.equationNote.textContent = model.basis === 'time'
+          ? 'altitude y · elapsed time t (s) · vertical drop'
+          : 'altitude y · horizontal distance x (m)';
+        elements.sensorXAxisUnit.textContent = model.basis === 'time' ? '· time (s)' : '· distance (m)';
+        elements.landing.textContent = landingDistance === null ? '—' : `${formatFixed(landingDistance)} m`;
+        elements.landingDirection.textContent = landingX === null ? 'no forward landing' : landingX < 0 ? 'left of release' : landingX > 0 ? 'right of release' : 'beneath release';
+        elements.hudLanding.innerHTML = landingDistance === null ? '—' : `${formatFixed(landingDistance)} <small>m</small>`;
         elements.resultStatus.textContent = flightReason;
         elements.resultStatus.style.color = flightValid ? 'var(--green)' : 'var(--amber)';
         elements.solverBadge.textContent = 'SOLVED';
         elements.solverBadge.classList.remove('error');
-        elements.sceneScaleLabel.textContent = `${model.roots.positiveRoot === null ? '—' : formatFixed(model.roots.positiveRoot)} m`;
+        elements.sceneScaleLabel.textContent = `${landingDistance === null ? '—' : formatFixed(landingDistance)} m`;
         const original = model.matrix.map((row, index) => row.concat(model.values[index]));
         renderMatrix(elements.originalMatrix, original);
         renderMatrix(elements.rrefMatrix, model.rref);
@@ -296,6 +388,10 @@
         resetSimulation();
         drawVisualizations();
       }
+      updateParameterReadouts(elements);
+      elements.parameterNotice.textContent = model
+        ? 'Model refreshed; the flight is back at READY with these parameters.'
+        : 'Model unavailable; correct the sensor values to continue.';
       updateControls();
     }
 
@@ -341,6 +437,12 @@
 
     function drawVisualizations() {
       const activeModel = model || { coefficients: [0, 0, 0], points: [], roots: { positiveRoot: null } };
+      const released = simulation.status === 'FALLING' || simulation.status === 'LANDED'
+        || (simulation.status === 'PAUSED' && (simulation.previousState === 'FALLING' || simulation.previousState === 'LANDED'));
+      const packagePosition = model && released && model.flightTime > 0
+        ? math.positionAtTime(model, simulation.flightElapsed)
+        : { x: 0, y: model?.coefficients[0] || 0, modelX: 0, time: 0 };
+      const parameters = readParameters(elements);
       const frame = {
         model: activeModel,
         time: simulation.time,
@@ -348,20 +450,29 @@
         previousState: simulation.previousState,
         progress: simulation.progress,
         planeProgress: simulation.planeProgress,
+        planeDistance: simulation.planeDistance,
         releasePlaneProgress: simulation.releasePlaneProgress,
+        releasePlaneDistance: simulation.releasePlaneDistance,
+        packagePosition,
         trajectoryVisible: elements.trajectoryToggle.checked,
         sensorsVisible: elements.sensorToggle.checked,
+        sensorLabelsVisible: elements.sensorLabelsToggle.checked,
+        landingVisible: elements.landingToggle.checked,
+        windIndicatorsVisible: elements.windVisualToggle.checked && parameters.windEnabled,
+        parameters,
         planeImage,
         packageImage,
         impactTime: simulation.impactTime
       };
       visualization.drawScene(elements.sceneCanvas, frame);
-      graphViewport = model ? visualization.drawGraph(elements.graphCanvas, model) : visualization.drawGraph(elements.graphCanvas, activeModel);
+      graphViewport = elements.graphToggle.checked ? visualization.drawGraph(elements.graphCanvas, activeModel, {
+        sensorsVisible: elements.sensorToggle.checked,
+        sensorLabelsVisible: elements.sensorLabelsToggle.checked,
+        landingVisible: elements.landingToggle.checked,
+        currentPosition: released && model ? packagePosition : null
+      }) : null;
       if (model) {
-        const packageInFlight = simulation.status === 'FALLING' || simulation.status === 'LANDED'
-          || (simulation.status === 'PAUSED' && (simulation.previousState === 'FALLING' || simulation.previousState === 'LANDED'));
-        const x = packageInFlight && model.roots.positiveRoot !== null ? model.roots.positiveRoot * simulation.progress : 0;
-        elements.sceneAltitude.textContent = formatFixed(Math.max(0, math.evaluate(model.coefficients, x)), 1);
+        elements.sceneAltitude.textContent = formatFixed(Math.max(0, packagePosition.y), 1);
       } else {
         elements.sceneAltitude.textContent = '—';
       }
@@ -372,22 +483,18 @@
       if (previousFrameTime === null) previousFrameTime = timestamp;
       const delta = Math.min(.05, Math.max(0, (timestamp - previousFrameTime) / 1000));
       previousFrameTime = timestamp;
-      const speed = Number(elements.speedSlider.value);
-      if (simulation.status !== 'PAUSED') {
-        simulation.time += delta * speed;
-        if (simulation.status === 'FLYING') {
-          simulation.planeProgress = Math.min(1, simulation.planeProgress + delta * .11);
-          simulation.autoDropElapsed += delta * speed;
-          if (elements.autoDropToggle.checked && simulation.autoDropElapsed >= 1.65) dropPackage();
-        } else if (simulation.status === 'FALLING') {
-          simulation.planeProgress = Math.min(1, simulation.planeProgress + delta * .15);
-          simulation.flightElapsed += delta * speed;
-          simulation.progress = Math.min(1, simulation.flightElapsed / FLIGHT_DURATION);
-          if (simulation.progress >= 1) {
-            simulation = transitionSimulation(simulation, 'land');
-            updateControls();
-          }
+      const previousStatus = simulation.status;
+      simulation = advanceSimulation(simulation, delta, readParameters(elements), model, Number(elements.speedSlider.value));
+      if (previousStatus === 'FLYING' && elements.autoDropToggle.checked && simulation.autoDropElapsed >= 1.65) dropPackage();
+      if (simulation.status === 'LANDED' && previousStatus !== 'LANDED') updateControls();
+      if (stepPlaybackActive && simulation.status !== 'PAUSED') {
+        stepPlaybackElapsed += delta * Number(elements.speedSlider.value);
+        while (stepPlaybackElapsed >= .9 && stepIndex < (model?.steps.length || 0) - 1) {
+          stepPlaybackElapsed -= .9;
+          stepIndex += 1;
+          renderStep();
         }
+        if (!model || stepIndex >= model.steps.length - 1) stopStepPlayback();
       }
       drawVisualizations();
     }
@@ -472,32 +579,53 @@
     elements.speedSlider.addEventListener('input', () => {
       elements.speedValue.value = `${Number(elements.speedSlider.value).toFixed(2)}×`;
     });
-    elements.trajectoryToggle.addEventListener('change', drawVisualizations);
-    elements.sensorToggle.addEventListener('change', drawVisualizations);
+    [elements.aircraftSpeedSlider, elements.altitudeSlider, elements.windSpeedSlider].forEach((input) => {
+      input.addEventListener('input', () => updateParameterReadouts(elements));
+      input.addEventListener('change', () => renderModel());
+    });
+    elements.windToggle.addEventListener('change', () => {
+      updateParameterReadouts(elements);
+      renderModel();
+    });
+    elements.windDirection.addEventListener('change', renderModel);
+    [elements.trajectoryToggle, elements.sensorToggle, elements.sensorLabelsToggle, elements.landingToggle, elements.windVisualToggle].forEach((toggle) => {
+      toggle.addEventListener('change', drawVisualizations);
+    });
+    elements.graphToggle.addEventListener('change', () => { byId('graphPanel').hidden = !elements.graphToggle.checked; drawVisualizations(); });
+    elements.matrixToggle.addEventListener('change', () => { byId('math-panel').hidden = !elements.matrixToggle.checked; });
+    elements.resultsToggle.addEventListener('change', () => { byId('resultPanel').hidden = !elements.resultsToggle.checked; });
+    elements.manualModeToggle.addEventListener('change', () => {
+      if (elements.manualModeToggle.checked) renderSensorRows(sensorPoints, true);
+      renderModel();
+    });
     elements.sensorRows.addEventListener('change', (event) => {
-      if (event.target.matches('.sensor-input')) renderModel();
+      if (elements.manualModeToggle.checked && event.target.matches('.sensor-input')) renderModel();
     });
     elements.sensorRows.addEventListener('click', (event) => {
       const button = event.target.closest('[data-remove-index]');
       if (!button) return;
       const points = readSensorRows();
       points.splice(Number(button.dataset.removeIndex), 1);
-      renderSensorRows(points);
+      renderSensorRows(points, true);
       renderModel();
     });
     byId('addSensor').addEventListener('click', () => {
       const points = readSensorRows();
       points.push({ x: NaN, y: NaN });
-      renderSensorRows(points);
+      renderSensorRows(points, true);
       renderModel();
       elements.sensorRows.querySelector('tr:last-child input')?.focus();
     });
     const loadSample = () => {
-      renderSensorRows(DEFAULT_POINTS.map((point) => ({ ...point })));
+      elements.manualModeToggle.checked = true;
+      renderSensorRows(DEFAULT_POINTS.map((point) => ({ ...point })), true);
       renderModel();
     };
     byId('loadSample').addEventListener('click', loadSample);
-    byId('resetData').addEventListener('click', loadSample);
+    byId('resetData').addEventListener('click', () => {
+      elements.manualModeToggle.checked = false;
+      renderModel();
+    });
     byId('recalculateButton').addEventListener('click', renderModel);
     byId('stepBack').addEventListener('click', () => changeStep(-1));
     byId('stepForward').addEventListener('click', () => changeStep(1));
@@ -508,23 +636,16 @@
     });
     byId('playSteps').addEventListener('click', () => {
       if (!model) return;
-      if (stepTimer !== null) {
+      if (stepPlaybackActive) {
         stopStepPlayback();
         return;
       }
       if (stepIndex >= model.steps.length - 1) stepIndex = 0;
+      stepPlaybackActive = true;
+      stepPlaybackElapsed = 0;
       byId('playStepsIcon').textContent = 'Ⅱ';
       byId('playStepsText').textContent = 'Pause steps';
       renderStep();
-      stepTimer = window.setInterval(() => {
-        if (!model || stepIndex >= model.steps.length - 1) {
-          stopStepPlayback();
-          return;
-        }
-        stepIndex += 1;
-        renderStep();
-        if (stepIndex >= model.steps.length - 1) stopStepPlayback();
-      }, 900);
       if (elements.presentationToggle.checked) setPresentation(2);
     });
     elements.presentationToggle.addEventListener('change', () => setPresentation(elements.presentationToggle.checked ? 0 : 4));
@@ -544,9 +665,10 @@
         elements.graphTooltip.hidden = true;
         return;
       }
-      const x = (xPixel - graphViewport.left) / (graphViewport.right - graphViewport.left) * graphViewport.xMax;
+      const x = graphViewport.xMin + (xPixel - graphViewport.left) / (graphViewport.right - graphViewport.left) * (graphViewport.xMax - graphViewport.xMin);
       const y = graphViewport.yMax - (yPixel - graphViewport.top) / (graphViewport.bottom - graphViewport.top) * (graphViewport.yMax - graphViewport.yMin);
-      elements.graphTooltip.textContent = `x ${formatFixed(x, 2)} m  ·  y ${formatFixed(y, 2)} m`;
+      const xUnit = model.axisLabel === 'time (s)' ? 's' : 'm';
+      elements.graphTooltip.textContent = `x ${formatFixed(x, 2)} ${xUnit}  ·  y ${formatFixed(y, 2)} m`;
       elements.graphTooltip.style.left = `${Math.min(rect.width - 130, xPixel + 10)}px`;
       elements.graphTooltip.style.top = `${Math.max(3, yPixel - 24)}px`;
       elements.graphTooltip.hidden = false;
@@ -571,5 +693,5 @@
     };
   }
 
-  return { createSimulationState, transitionSimulation, init };
+  return { advanceSimulation, createSimulationState, transitionSimulation, init };
 });

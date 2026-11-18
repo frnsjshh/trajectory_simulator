@@ -60,6 +60,69 @@
     return { points, matrix, values: points.map(({ y }) => y), coefficients, roots: findPositiveRoot(coefficients), ...solved };
   }
 
+  function generatePhysicsModel(parameters = {}) {
+    const aircraftSpeed = Number(parameters.aircraftSpeed ?? parameters.speed ?? 60);
+    const altitude = Number(parameters.altitude ?? 90);
+    const gravity = Number(parameters.gravity ?? 9.81);
+    const windEnabled = Boolean(parameters.windEnabled);
+    const windSpeed = windEnabled ? Number(parameters.windSpeed ?? 0) : 0;
+    const windDirection = parameters.windDirection === 'headwind' ? 'headwind' : 'tailwind';
+    if (!Number.isFinite(aircraftSpeed) || aircraftSpeed <= 0) throw new Error('Aircraft speed must be a positive finite number.');
+    if (!Number.isFinite(altitude) || altitude <= 0) throw new Error('Release altitude must be a positive finite number.');
+    if (!Number.isFinite(gravity) || gravity <= 0) throw new Error('Gravity must be a positive finite number.');
+    if (!Number.isFinite(windSpeed) || windSpeed < 0 || windSpeed > 20) throw new Error('Wind speed must be between 0 and 20 m/s.');
+
+    const signedWindSpeed = windEnabled ? (windDirection === 'headwind' ? -windSpeed : windSpeed) : 0;
+    const effectiveHorizontalSpeed = aircraftSpeed + signedWindSpeed;
+    const flightTime = Math.sqrt(2 * altitude / gravity);
+    const basis = Math.abs(effectiveHorizontalSpeed) < 1e-10 ? 'time' : 'distance';
+    const fractions = [0.2, 0.5, 0.8];
+    const sampleTimes = fractions.map((fraction) => fraction * flightTime);
+    const points = sampleTimes.map((time) => ({
+      x: basis === 'time' ? time : effectiveHorizontalSpeed * time,
+      y: altitude - 0.5 * gravity * time * time
+    }));
+    const solved = fitQuadratic(points);
+    const landingTime = basis === 'time'
+      ? solved.roots.positiveRoot
+      : flightTime;
+    const expectedLandingX = effectiveHorizontalSpeed * flightTime;
+    const landingX = basis === 'time'
+      ? 0
+      : solved.roots.roots.find((value) => Math.sign(value) === Math.sign(expectedLandingX)) ?? null;
+    if (landingTime === null || landingX === null) throw new Error('The reconstructed polynomial has no landing root in the physical travel direction.');
+
+    return {
+      ...solved,
+      basis,
+      axisLabel: basis === 'time' ? 'time (s)' : 'horizontal distance (m)',
+      gravity,
+      releaseAltitude: altitude,
+      aircraftSpeed,
+      windEnabled,
+      windSpeed,
+      windDirection,
+      signedWindSpeed,
+      effectiveHorizontalSpeed,
+      flightTime,
+      landingTime,
+      landingX,
+      landingDistance: Math.abs(landingX),
+      scenePoints: points.map((point) => ({ x: basis === 'time' ? 0 : point.x, y: point.y }))
+    };
+  }
+
+  function positionAtTime(model, elapsed) {
+    const flightTime = model.flightTime;
+    const time = Math.min(flightTime, Math.max(0, Number.isFinite(elapsed) ? elapsed : 0));
+    const atLanding = time >= flightTime;
+    if (model.basis === 'time') {
+      return { x: 0, y: atLanding ? 0 : evaluate(model.coefficients, time), time, modelX: time };
+    }
+    const x = atLanding ? model.landingX : model.effectiveHorizontalSpeed * time;
+    return { x, y: atLanding ? 0 : evaluate(model.coefficients, x), time, modelX: x };
+  }
+
   function sampleTrajectory(coefficients, endX, count = 80) {
     if (!Number.isFinite(endX) || endX < 0) return [];
     const safeCount = Math.max(2, Math.floor(count));
@@ -76,5 +139,5 @@
     return { x, y: clampedProgress === 1 && landing !== null ? 0 : evaluate(model.coefficients, x), progress: clampedProgress };
   }
 
-  return { evaluate, findPositiveRoot, fitQuadratic, sampleTrajectory, trajectoryPosition };
+  return { evaluate, findPositiveRoot, fitQuadratic, generatePhysicsModel, positionAtTime, sampleTrajectory, trajectoryPosition };
 });
