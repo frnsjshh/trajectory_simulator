@@ -1,0 +1,11 @@
+{
+  "name": "trajectory-simulator",
+  "version": "1.0.0",
+  "description": "Interactive aircraft projectile trajectory and linear algebra simulator",
+  "main": "index.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node index.js"
+  },
+  "private": true
+}

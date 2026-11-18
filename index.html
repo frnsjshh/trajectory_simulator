@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071421">
+  <meta name="description" content="An interactive aircraft-drop simulator powered by a real Gauss–Jordan solver.">
+  <title>Trajectory Lab — Linear Algebra Flight Simulator</title>
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#top" aria-label="Trajectory Lab home">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M4 20.5 27 8l-8.8 18-3.1-7.1L4 20.5Z"/><path d="m15.1 18.9 7.2-6.1"/></svg></span>
+        <span><strong>VECTOR / FLIGHT</strong><small>LINEAR ALGEBRA LAB</small></span>
+      </a>
+      <div class="topbar-meta"><span class="live-dot"></span><span>SIMULATION ONLINE</span><span class="topbar-divider"></span><span>MODEL 02 · QUADRATIC</span></div>
+      <a class="top-link" href="#math-panel">Explore the math <span aria-hidden="true">↘</span></a>
+    </header>
+
+    <main id="top">
+      <section class="intro-row">
+        <div>
+          <p class="eyebrow"><span class="eyebrow-line"></span> FIELD TEST  /  PROJECTILE MOTION</p>
+          <h1>Drop with <span>precision.</span></h1>
+          <p class="intro-copy">Three altitude readings. One quadratic model. Watch linear algebra chart a safe landing.</p>
+        </div>
+        <div class="mission-pill"><span class="mission-icon">✳</span><span><b>MISSION 04</b><small>SUPPLY DROP · LIVE MODEL</small></span></div>
+      </section>
+
+      <section class="main-grid" aria-label="Flight simulation and results">
+        <div class="scene-card panel">
+          <div class="scene-toolbar">
+            <div class="scene-heading"><span class="section-kicker">01 / LIVE SIMULATION</span><span class="scene-tag"><span class="live-dot"></span> <span id="sceneStatus">READY FOR DROP</span></span></div>
+            <button class="icon-button" id="sceneFullscreen" type="button" title="Toggle full screen" aria-label="Toggle full screen">⛶</button>
+          </div>
+          <div class="scene-wrap" id="sceneWrap">
+            <canvas id="simulationCanvas" aria-label="Side view of the aircraft and predicted supply drop"></canvas>
+            <div class="scene-coordinate coordinate-top">ALT <b id="sceneAltitude">45.0</b> m</div>
+            <div class="scene-scale"><span>0 m</span><span class="scale-rule"></span><span id="sceneScaleLabel">3 m</span></div>
+            <div class="scene-hud"><span class="hud-label">DROP VECTOR</span><strong id="hudLanding">3.00 <small>m</small></strong><span>predicted range</span></div>
+            <div class="scene-legend"><span><i class="legend-curve"></i> Predicted path</span><span><i class="legend-point"></i> Sensor points</span></div>
+          </div>
+          <div class="flight-console">
+            <div class="button-row">
+              <button class="button button-primary" id="startButton" type="button"><span class="button-icon">▶</span> Start simulation</button>
+              <button class="button button-drop" id="dropButton" type="button" disabled><span class="button-icon">↓</span> Drop package</button>
+              <button class="button button-quiet" id="pauseButton" type="button" disabled>Ⅱ <span>Pause</span></button>
+              <button class="button button-quiet" id="resumeButton" type="button" hidden>▶ <span>Resume</span></button>
+              <button class="button button-quiet" id="resetButton" type="button">↺ <span>Reset</span></button>
+              <button class="button button-quiet" id="replayButton" type="button" hidden>↻ <span>Replay</span></button>
+            </div>
+            <div class="flight-options">
+              <label class="speed-control" for="speedSlider"><span>SIM SPEED</span><input id="speedSlider" type="range" min="0.25" max="2" step="0.25" value="1"><output id="speedValue" for="speedSlider">1.00×</output></label>
+              <label class="switch-label"><input id="trajectoryToggle" type="checkbox" checked><span class="switch"></span><span>Trajectory</span></label>
+              <label class="switch-label"><input id="sensorToggle" type="checkbox" checked><span class="switch"></span><span>Sensors</span></label>
+              <label class="switch-label auto-drop"><input id="autoDropToggle" type="checkbox"><span class="switch"></span><span>Auto-drop</span></label>
+            </div>
+          </div>
+        </div>
+
+        <aside class="results-column" aria-label="Calculated flight results">
+          <article class="result-card panel">
+            <div class="card-head"><span class="section-kicker">02 / FLIGHT PREDICTION</span><span class="status-badge" id="solverBadge">SOLVED</span></div>
+            <div class="equation-block"><span class="result-label">TRAJECTORY MODEL</span><div class="equation" id="equationOutput">y = 45 − 5x²</div><div class="equation-note">altitude <i>y</i> · horizontal distance <i>x</i></div></div>
+            <div class="landing-result"><div><span class="result-label">PREDICTED LANDING</span><strong id="landingOutput">3.00 <small>m</small></strong></div><span class="landing-icon">↗</span></div>
+            <div class="coefficient-row">
+              <div><span>a₀</span><strong id="coefficientA0">45</strong></div><div><span>a₁</span><strong id="coefficientA1">0</strong></div><div><span>a₂</span><strong id="coefficientA2">−5</strong></div>
+            </div>
+            <div class="result-footer"><span><i class="result-dot"></i><span id="resultStatus">Flight path valid</span></span><span><b id="sensorCount">3</b> sensors</span></div>
+          </article>
+
+          <article class="graph-card panel">
+            <div class="card-head"><div><span class="section-kicker">03 / TRAJECTORY PLOT</span><h2>Altitude profile</h2></div><span class="graph-unit">m <span>×</span> m</span></div>
+            <div class="graph-wrap"><canvas id="trajectoryCanvas" aria-label="Graph of altitude versus horizontal distance"></canvas><div class="graph-tooltip" id="graphTooltip" role="status" hidden></div></div>
+            <div class="graph-legend"><span><i class="graph-line-key"></i> Quadratic fit</span><span><i class="graph-sensor-key"></i> Sensors</span><span><i class="graph-ground-key"></i> Ground level</span></div>
+          </article>
+        </aside>
+      </section>
+
+      <section class="lower-grid">
+        <article class="panel math-panel" id="math-panel">
+          <div class="panel-title-row"><div><span class="section-kicker">04 / LINEAR ALGEBRA</span><h2>From readings to trajectory</h2><p class="panel-subtitle">Solve <span class="mono">AX = B</span> with Gauss–Jordan elimination.</p></div><span class="matrix-icon" aria-hidden="true">[ A ]</span></div>
+          <div class="matrix-topline"><div><span class="result-label">ORIGINAL AUGMENTED MATRIX <span>[A | B]</span></span><div class="matrix" id="originalMatrix" aria-label="Original augmented matrix"></div></div><div class="matrix-arrow" aria-hidden="true">→</div><div><span class="result-label">REDUCED ROW-ECHELON FORM</span><div class="matrix" id="rrefMatrix" aria-label="Reduced row-echelon form"></div></div></div>
+          <div class="operation-panel">
+            <div class="operation-head"><div><span class="result-label">ROW OPERATIONS</span><strong id="stepLabel">Step 1 of 1 · Starting augmented matrix</strong></div><span class="step-counter" id="stepCounter">01 / 01</span></div>
+            <div class="operation-current"><span class="operation-arrow">↳</span><code id="operationText">Initial matrix</code></div>
+            <div class="matrix step-matrix" id="stepMatrix" aria-label="Augmented matrix at the selected elimination step"></div>
+            <div class="operation-controls"><button class="mini-button" id="stepBack" type="button" aria-label="Previous matrix step">←</button><button class="mini-button play-step" id="playSteps" type="button"><span id="playStepsIcon">▶</span><span id="playStepsText">Play steps</span></button><button class="mini-button" id="stepForward" type="button" aria-label="Next matrix step">→</button><button class="mini-button mini-reset" id="resetSteps" type="button">Reset</button></div>
+          </div>
+          <div class="solution-strip"><span class="result-label">SOLUTION VECTOR <span>X = [ a₀  a₁  a₂ ]ᵀ</span></span><div id="solutionVector" class="solution-vector"><span>45</span><i>·</i><span>0</span><i>·</i><span>−5</span></div></div>
+        </article>
+
+        <article class="panel sensor-panel">
+          <div class="panel-title-row"><div><span class="section-kicker">05 / SENSOR ARRAY</span><h2>Altitude readings</h2><p class="panel-subtitle">Three distinct positions define the quadratic.</p></div><span class="sensor-count-bubble" id="sensorCountBubble">03</span></div>
+          <div class="sensor-table-wrap"><table class="sensor-table"><thead><tr><th>Sensor</th><th><i>x</i> · distance (m)</th><th><i>y</i> · altitude (m)</th><th><span class="sr-only">Remove sensor</span></th></tr></thead><tbody id="sensorRows"></tbody></table></div>
+          <div class="sensor-error" id="sensorError" role="alert" hidden></div>
+          <div class="sensor-actions"><button class="text-button" id="addSensor" type="button">＋ Add sensor</button><button class="text-button muted-link" id="loadSample" type="button">Load sample</button></div>
+          <div class="recalculate-row"><button class="button button-primary recalculate-button" id="recalculateButton" type="button">Recalculate model <span>↗</span></button><button class="reset-data" id="resetData" type="button">Reset default</button></div>
+          <div class="model-note"><span>i</span><p>Interpolation uses exactly three measurements. Add more only when preparing another three-point set.</p></div>
+        </article>
+      </section>
+
+      <section class="bottom-grid">
+        <article class="panel presentation-panel">
+          <div class="panel-title-row"><div><span class="section-kicker">06 / PRESENTATION MODE</span><h2>Explain as you fly</h2></div><label class="switch-label"><input id="presentationToggle" type="checkbox"><span class="switch"></span><span>Enable</span></label></div>
+          <div class="presentation-content" id="presentationContent"><span class="presentation-step" id="presentationStep">STEP 01</span><p id="presentationText">Three altitude readings are ready. Each sensor contributes one equation to our model.</p><div class="presentation-progress"><span id="presentationProgress"></span></div></div>
+        </article>
+        <article class="panel artwork-panel">
+          <div><span class="section-kicker">CUSTOM ARTWORK</span><h2>Make it yours</h2><p class="panel-subtitle">Optional sprites · defaults are drawn on Canvas.</p></div>
+          <div class="artwork-controls">
+            <label class="upload-button" for="planeUpload">＋ Plane image<input id="planeUpload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
+            <label class="upload-button" for="packageUpload">＋ Package image<input id="packageUpload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
+            <button class="text-button muted-link" id="resetArtwork" type="button">Reset art</button>
+          </div>
+          <div class="artwork-previews"><div><img id="planePreview" alt="Custom plane preview" hidden><span id="planePreviewLabel">✈ <small>Default plane</small></span></div><div><img id="packagePreview" alt="Custom package preview" hidden><span id="packagePreviewLabel">▧ <small>Default crate</small></span></div></div>
+          <p class="artwork-message" id="artworkMessage" role="status" aria-live="polite"></p>
+        </article>
+      </section>
+      <footer class="footer"><span>VECTOR / FLIGHT <i>·</i> LINEAR ALGEBRA LAB</span><span>Built on actual measurements, not guesswork.</span></footer>
+    </main>
+  </div>
+  <script src="js/solver.js"></script>
+  <script src="js/trajectory.js"></script>
+  <script src="js/visualization.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
