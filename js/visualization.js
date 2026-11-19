@@ -1,11 +1,13 @@
 (function (root, factory) {
-  const api = factory();
+  const artworkModule = root?.TrajectoryArtwork || (typeof require === 'function' ? require('./artwork') : null);
+  const api = factory(artworkModule);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TrajectoryVisualization = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (artworkModule) {
   'use strict';
 
   const COLORS = { cyan: '#66e4db', amber: '#ffbf78', green: '#83e6b3', ink: '#123346' };
+  const artwork = artworkModule?.createArtwork ? artworkModule.createArtwork() : null;
 
   function prepareCanvas(canvas) {
     if (!canvas) return null;
@@ -23,6 +25,83 @@
     return { context, width, height };
   }
 
+  function measureSceneDomain(model, frame = {}) {
+    const landingX = Number.isFinite(model?.landingX) ? model.landingX : model?.roots?.positiveRoot;
+    const landing = Number.isFinite(landingX) ? landingX : 0;
+    const sensorPoints = model?.scenePoints || model?.points || [];
+    const sensorXs = sensorPoints.map(({ x }) => Number(x)).filter(Number.isFinite);
+    const coefficients = model?.coefficients || [0, 0, 0];
+    const aircraftSpeed = Math.max(Number(frame.parameters?.aircraftSpeed) || 0, Number(model?.aircraftSpeed) || 0);
+    const flightTime = Math.max(0, Number(model?.flightTime) || 0);
+    const planeTravel = aircraftSpeed * flightTime;
+    const sceneXs = [0, landing, planeTravel, ...sensorXs];
+    const minX = Math.min(...sceneXs);
+    const maxX = Math.max(...sceneXs);
+    const span = Math.max(0, maxX - minX);
+    const margin = Math.max(16, span * 0.1);
+    const cruise = Math.max(30, aircraftSpeed * 3);
+    let domainMin = minX - margin;
+    let domainMax = maxX + margin + cruise;
+    const minimumSpan = 170;
+    if (domainMax - domainMin < minimumSpan) {
+      const pad = (minimumSpan - (domainMax - domainMin)) / 2;
+      domainMin -= pad;
+      domainMax += pad;
+    }
+    const releaseAltitude = Number(model?.releaseAltitude ?? coefficients[0]) || 0;
+    const altitudeValues = [0, releaseAltitude, ...sensorPoints.map(({ y }) => Number(y)).filter(Number.isFinite)];
+    const curvature = coefficients[2];
+    const vertexX = Math.abs(curvature) > 1e-12 ? -coefficients[1] / (2 * curvature) : NaN;
+    if (Number.isFinite(vertexX) && vertexX >= minX && vertexX <= maxX) {
+      altitudeValues.push(coefficients[0] + coefficients[1] * vertexX + curvature * vertexX * vertexX);
+    }
+    const finiteAltitudes = altitudeValues.filter(Number.isFinite);
+    return {
+      domainMin,
+      domainMax,
+      releaseLaneSpan: cruise,
+      worldDomain: domainMax - domainMin,
+      minAltitude: Math.min(0, ...finiteAltitudes),
+      maxAltitude: Math.max(10, ...finiteAltitudes),
+      landingX: Number.isFinite(landingX) ? landingX : null
+    };
+  }
+
+  function createSceneViewport(width, height, model, frame = {}) {
+    const safeWidth = Math.max(1, width);
+    const safeHeight = Math.max(1, height);
+    const measured = measureSceneDomain(model, frame);
+    const domainMin = Number.isFinite(frame.domainOverride?.domainMin) ? frame.domainOverride.domainMin : measured.domainMin;
+    const domainMax = Number.isFinite(frame.domainOverride?.domainMax) ? frame.domainOverride.domainMax : measured.domainMax;
+    const maxAltitude = Number.isFinite(frame.domainOverride?.maxAltitude) ? frame.domainOverride.maxAltitude : measured.maxAltitude;
+    const minAltitude = measured.minAltitude;
+    const worldDomain = Math.max(1, domainMax - domainMin);
+    const left = safeWidth * 0.07;
+    const right = safeWidth * 0.93;
+    const plotWidth = Math.max(1, right - left);
+    const xScale = plotWidth / worldDomain;
+    const yTop = safeHeight * 0.18;
+    const groundY = safeHeight * 0.8;
+    const yScale = (groundY - yTop) / (Math.max(10, maxAltitude) * 1.16);
+    const phase = frame.state === 'PAUSED' ? frame.previousState : frame.state;
+    const released = phase === 'FALLING' || phase === 'LANDED';
+    const planeDistance = Math.max(0, Number(frame.planeDistance) || 0);
+    const releaseDistance = Math.max(0, Number(frame.releasePlaneDistance) || 0);
+    const releaseOffset = positiveModulo(released ? releaseDistance : planeDistance, measured.releaseLaneSpan);
+    const worldReleaseX = releaseOffset - domainMin;
+    const mapWorldX = (worldX) => left + worldX * xScale;
+    const mapSceneX = (sceneX) => mapWorldX(worldReleaseX + sceneX);
+    const mapY = (altitude) => groundY - altitude * yScale;
+    const planeWorldX = released
+      ? positiveModulo(worldReleaseX + Math.max(0, planeDistance - releaseDistance), worldDomain)
+      : worldReleaseX;
+    return {
+      left, right, yTop, groundY, xScale, yScale, worldDomain, worldReleaseX, domainMin, domainMax,
+      originX: mapSceneX(0), planeX: mapWorldX(planeWorldX), landingX: measured.landingX, maxAltitude, minAltitude,
+      mapWorldX, mapSceneX, mapY
+    };
+  }
+
   function drawScene(canvas, frame, options = {}) {
     const prepared = prepareCanvas(canvas);
     if (!prepared) return null;
@@ -30,103 +109,56 @@
     const { model, time = 0, state = 'READY', previousState = 'READY', planeDistance = 0, releasePlaneDistance = 0, trajectoryVisible = true, sensorsVisible = true, sensorLabelsVisible = false, landingVisible = true, windIndicatorsVisible = false, parameters = {}, packagePosition = { x: 0, y: 0 }, planeImage = null, packageImage = null, impactTime = 0 } = frame;
     const visualState = state === 'PAUSED' ? previousState : state;
     const coefficients = model?.coefficients || [0, 0, 0];
-    const landingX = Number.isFinite(model?.landingX) ? model.landingX : model?.roots?.positiveRoot;
-    const range = Number.isFinite(landingX) ? Math.abs(landingX) : 0;
+    const viewport = createSceneViewport(width, height, model, frame);
+    const { groundY, xScale, originX, landingX, mapSceneX, mapY } = viewport;
+    const mapX = mapSceneX;
     const sensorPoints = model?.scenePoints || model?.points || [];
     const released = visualState === 'FALLING' || visualState === 'LANDED';
-    const left = width * .1;
-    const right = width * .9;
-    const plotWidth = Math.max(1, right - left);
-    const visualDomain = Math.max(range, Number(parameters.aircraftSpeed || 0) * Number(model?.flightTime || 1) * .6, 30);
-    const xScale = plotWidth / (visualDomain * 1.15);
-    const flightSpan = range * xScale;
-    const laneWidth = Math.max(18, plotWidth - flightSpan);
-    const laneStart = left + (landingX < 0 ? flightSpan : 0);
-    const anchorDistance = released ? releasePlaneDistance : planeDistance;
-    const originX = laneStart + positiveModulo(anchorDistance * xScale, laneWidth);
-    const yTop = height * .14;
-    const groundY = height * .82;
-    const maxAltitude = Math.max(200, coefficients[0], ...sensorPoints.map((point) => point.y));
-    const yScale = (groundY - yTop) / (maxAltitude * 1.08);
-    const mapX = (x) => originX + x * xScale;
-    const mapY = (y) => groundY - y * yScale;
-    const sky = ctx.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, '#72b6d2');
-    sky.addColorStop(.52, '#a4d5dc');
-    sky.addColorStop(1, '#e1dcb7');
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, width, height);
-
-    ctx.save();
-    ctx.globalAlpha = .15;
-    ctx.fillStyle = '#fff5dd';
-    ctx.beginPath();
-    ctx.arc(width * .78, height * .18, height * .09, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    drawClouds(ctx, width, height, time);
-    drawRidge(ctx, width, height, time, .64, '#769c99', .0022, 0);
-    drawRidge(ctx, width, height, time, .73, '#567c76', .0036, 1);
+    const scrollMeters = Math.max(0, Number(planeDistance) || 0);
+    artwork?.drawEnvironment(ctx, width, height, time, scrollMeters * xScale);
     if (windIndicatorsVisible && parameters.windSpeed > 0) drawWindIndicators(ctx, width, height, time, parameters.windDirection, parameters.windSpeed);
-
-    const groundGradient = ctx.createLinearGradient(0, groundY, 0, height);
-    groundGradient.addColorStop(0, '#547a56');
-    groundGradient.addColorStop(.12, '#3c674c');
-    groundGradient.addColorStop(1, '#284c40');
-    ctx.fillStyle = groundGradient;
-    ctx.fillRect(0, groundY, width, height - groundY);
-    ctx.fillStyle = 'rgba(217,222,160,.8)';
-    ctx.fillRect(0, groundY, width, 2);
-    drawGrass(ctx, width, groundY, height, time);
 
     if (trajectoryVisible && Number.isFinite(landingX)) {
       ctx.save();
       ctx.beginPath();
-      ctx.setLineDash([4, 6]);
-      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 7]);
+      ctx.lineJoin = 'round';
+      const steps = 100;
+      for (let index = 0; index <= steps; index += 1) {
+        const progress = index / steps;
+        const sceneX = model?.basis === 'time' ? 0 : landingX * progress;
+        const modelX = model?.basis === 'time' ? (Number(model.landingTime) || 0) * progress : sceneX;
+        const rawY = coefficients[0] + modelX * (coefficients[1] + coefficients[2] * modelX);
+        const y = index === steps ? 0 : rawY;
+        const screenX = mapX(sceneX);
+        const screenY = mapY(y);
+        if (index === 0) ctx.moveTo(screenX, screenY);
+        else ctx.lineTo(screenX, screenY);
+      }
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = 'rgba(13,47,54,.78)';
+      ctx.stroke();
+      ctx.lineWidth = 2.5;
       ctx.strokeStyle = COLORS.cyan;
       ctx.shadowColor = 'rgba(48,221,210,.48)';
       ctx.shadowBlur = 7;
-      for (let index = 0; index <= 90; index += 1) {
-        const progress = index / 90;
-        const x = model.basis === 'time' ? 0 : landingX * progress;
-        const modelX = model.basis === 'time' ? model.landingTime * progress : x;
-        const y = index === 90 ? 0 : coefficients[0] + modelX * (coefficients[1] + coefficients[2] * modelX);
-        if (index === 0) ctx.moveTo(mapX(x), mapY(y));
-        else ctx.lineTo(mapX(x), mapY(y));
-      }
       ctx.stroke();
       ctx.restore();
     }
 
     if (sensorsVisible) {
+      const markerRadius = Math.max(8, Math.min(12, width / 78));
       sensorPoints.forEach(({ x, y }, index) => {
-        const px = mapX(x);
-        const py = mapY(y);
-        ctx.beginPath();
-        ctx.arc(px, py, 4, 0, Math.PI * 2);
-        ctx.fillStyle = COLORS.amber;
-        ctx.fill();
-        ctx.lineWidth = 1.5;
-        ctx.strokeStyle = 'rgba(40,52,48,.65)';
-        ctx.stroke();
-        if (sensorLabelsVisible) {
-          ctx.fillStyle = '#fff1d9';
-          ctx.font = '8px "DM Mono", monospace';
-          ctx.textAlign = 'left';
-          ctx.fillText(`S${index + 1}`, px + 6, py - 6);
-        }
+        drawSensorMarker(ctx, mapX(x), mapY(y), markerRadius, sensorLabelsVisible ? `S${index + 1}  ${formatSceneNumber(x)}, ${formatSceneNumber(y)}` : '');
       });
     }
 
     if (landingVisible && Number.isFinite(landingX)) drawTarget(ctx, mapX(landingX), groundY, time);
 
-    const planeLaneWidth = Math.max(1, right - left);
-    const planeX = released
-      ? left + positiveModulo((originX - left) + (planeDistance - releasePlaneDistance) * xScale, planeLaneWidth)
-      : originX;
-    const planeY = mapY(model?.releaseAltitude ?? coefficients[0]) - 22;
+    const planeX = viewport.planeX;
+    const releaseY = mapY(coefficients[0]);
+    const spriteScale = Math.max(0.92, Math.min(1.28, width / 760));
+    const planeY = releaseY - Math.max(22, height * 0.05);
 
     if (!released && Number.isFinite(landingX) && trajectoryVisible) {
       ctx.save();
@@ -134,45 +166,35 @@
       ctx.setLineDash([2, 4]);
       ctx.beginPath();
       ctx.moveTo(originX, groundY + 1);
-      ctx.lineTo(originX, mapY(coefficients[0]) + 13);
+      ctx.lineTo(originX, releaseY + 12);
       ctx.stroke();
       ctx.restore();
     }
 
     const propellerAngle = time * 22;
-    drawAircraft(ctx, planeImage, planeX, planeY + Math.sin(time * 2.4) * 1.5, Math.min(1, width / 650), propellerAngle);
+    artwork?.drawAircraft(ctx, planeImage, planeX, planeY + Math.sin(time * 2.4) * 1.5, spriteScale, propellerAngle);
     if (!released) {
-      drawPackage(ctx, packageImage, planeX - 18, mapY(model?.releaseAltitude ?? coefficients[0]) + 11, 0, Math.min(1, width / 650));
+      artwork?.drawPackage(ctx, packageImage, planeX, releaseY, 0, spriteScale);
     } else if (Number.isFinite(landingX)) {
       const packagePixelX = mapX(packagePosition.x);
-      const packagePixelY = mapY(packagePosition.y) + (visualState === 'LANDED' ? -2 : 9);
-      if (trajectoryVisible && visualState !== 'LANDED') {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(255,245,219,.4)';
-        ctx.setLineDash([2, 4]);
-        ctx.beginPath();
-        ctx.moveTo(packagePixelX, packagePixelY + 9);
-        ctx.lineTo(packagePixelX, groundY);
-        ctx.stroke();
-        ctx.restore();
-      }
-      if (visualState !== 'LANDED') drawPackage(ctx, packageImage, packagePixelX, packagePixelY, time * .7, Math.min(1, width / 650));
-      else drawImpact(ctx, packagePixelX, groundY, time - impactTime);
+      const packagePixelY = mapY(Math.max(0, packagePosition.y));
+      artwork?.drawPackage(ctx, packageImage, packagePixelX, packagePixelY, visualState === 'LANDED' ? 0 : time * .7, spriteScale);
+      if (visualState === 'LANDED') drawImpact(ctx, packagePixelX, groundY, time - impactTime);
     }
 
     if (state === 'PAUSED') {
       ctx.fillStyle = 'rgba(5,18,28,.32)';
       ctx.fillRect(0, 0, width, height);
       ctx.fillStyle = 'rgba(7,25,36,.77)';
-      roundedRect(ctx, width / 2 - 45, 17, 90, 23, 11);
+      roundedRect(ctx, width / 2 - 62, 14, 124, 28, 12);
       ctx.fill();
       ctx.fillStyle = '#ecf5f4';
-      ctx.font = '9px "DM Mono", monospace';
+      ctx.font = '15px "DM Mono", monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('Ⅱ  PAUSED', width / 2, 32);
+      ctx.fillText('Ⅱ  PAUSED', width / 2, 34);
     }
 
-    return { originX, groundY, xScale, yScale, mapX, mapY, landingX };
+    return { ...viewport, mapX, mapY };
   }
 
   function positiveModulo(value, divisor) {
@@ -202,17 +224,18 @@
     }
   }
 
-  function drawClouds(ctx, width, height, time) {
+  function drawClouds(ctx, width, height, time, scrollPixels) {
     const cloudSets = [
-      { y: .25, size: 1, speed: 5, offset: 50, alpha: .44 },
-      { y: .38, size: .7, speed: 9, offset: 270, alpha: .32 },
-      { y: .17, size: .58, speed: 3, offset: 520, alpha: .29 }
+      { y: .22, size: 1.05, factor: 0.22, drift: 6, offset: 40, alpha: .5 },
+      { y: .34, size: .72, factor: 0.38, drift: 9, offset: 260, alpha: .36 },
+      { y: .14, size: .58, factor: 0.12, drift: 4, offset: 520, alpha: .32 }
     ];
     cloudSets.forEach((cloud) => {
       const cloudWidth = 68 * cloud.size;
-      const x = ((cloud.offset + time * cloud.speed) % (width + cloudWidth * 2)) - cloudWidth;
+      const travel = scrollPixels * cloud.factor + time * cloud.drift;
+      const x = positiveModulo(cloud.offset - travel, width + cloudWidth * 2) - cloudWidth;
       drawCloud(ctx, x, height * cloud.y, cloud.size, cloud.alpha);
-      drawCloud(ctx, x + width * .68, height * (cloud.y + .045), cloud.size * .72, cloud.alpha * .78);
+      drawCloud(ctx, x + width * .62, height * (cloud.y + .05), cloud.size * .74, cloud.alpha * .78);
     });
   }
 
@@ -229,41 +252,148 @@
     ctx.restore();
   }
 
-  function drawRidge(ctx, width, height, time, baseline, color, frequency, phase) {
+  function drawMountainRange(ctx, width, groundY, scrollPixels, amplitude, color, frequency) {
+    const period = Math.max(width + 80, 320);
+    const shift = positiveModulo(scrollPixels, period);
     ctx.save();
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(0, height);
-    ctx.lineTo(0, height * baseline);
-    for (let x = 0; x <= width + 10; x += 8) {
-      const shift = time * (phase ? 3 : 1.5);
-      const y = height * baseline - (Math.sin((x + shift) * frequency) * 10 + Math.sin((x + shift) * frequency * 2.2 + phase) * 5 + 6);
-      ctx.lineTo(x, y);
+    ctx.moveTo(-20, groundY + 4);
+    for (let x = -20; x <= width + 24; x += 10) {
+      const along = x + shift;
+      const peak = Math.sin(along * frequency) * amplitude * 0.62
+        + Math.sin(along * frequency * 2.15 + 0.7) * amplitude * 0.24
+        + Math.abs(Math.sin(along * frequency * 0.47)) * amplitude * 0.2;
+      ctx.lineTo(x, groundY - amplitude * 0.35 - peak);
     }
-    ctx.lineTo(width, height);
+    ctx.lineTo(width + 24, groundY + 8);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
   }
 
-  function drawGrass(ctx, width, groundY, height, time) {
+  function drawBuildings(ctx, width, groundY, scrollPixels) {
+    const spacing = 168;
+    const shift = positiveModulo(scrollPixels, spacing);
     ctx.save();
-    ctx.strokeStyle = 'rgba(199,211,144,.29)';
-    ctx.lineWidth = 1;
-    for (let x = 6; x < width; x += 17) {
-      const sway = Math.sin(time * 1.3 + x * .1) * 2;
-      const length = 3 + (x % 4);
+    for (let index = -1; ; index += 1) {
+      const x = index * spacing - shift;
+      if (x > width + spacing) break;
+      const kind = positiveModulo(index * 5 + 2, 4);
+      if (kind === 0) continue;
+      const buildingWidth = 18 + positiveModulo(index * 7, 5) * 6;
+      const buildingHeight = 16 + kind * 9 + positiveModulo(index * 3, 4) * 4;
+      ctx.fillStyle = kind === 1 ? 'rgba(63, 84, 92, .42)' : 'rgba(86, 96, 104, .34)';
+      ctx.fillRect(x, groundY - buildingHeight, buildingWidth, buildingHeight);
+      ctx.fillStyle = 'rgba(214, 196, 150, .28)';
+      const windowSize = 2;
+      for (let row = 4; row < buildingHeight - 3; row += 6) {
+        for (let column = 3; column < buildingWidth - 3; column += 6) {
+          ctx.fillRect(x + column, groundY - buildingHeight + row, windowSize, windowSize);
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawTreeLayer(ctx, width, baseline, scrollPixels, spacing, layer) {
+    const shift = positiveModulo(scrollPixels, spacing);
+    const first = Math.floor((shift - spacing) / spacing);
+    const canopy = ['#2f5b49', '#3d6a52', '#24483c', '#4e7358'];
+    ctx.save();
+    for (let index = first; ; index += 1) {
+      const x = index * spacing - shift;
+      if (x > width + spacing) break;
+      const variation = positiveModulo(index * 17 + layer * 11, 7);
+      const scale = (layer ? 0.82 : 0.62) + variation * 0.07;
+      const kind = positiveModulo(index * 3 + layer, 3);
+      const treeHeight = (layer ? 34 : 24) + variation * 3.4;
+      const treeWidth = (layer ? 15 : 11) + variation * 1.2;
+      ctx.fillStyle = layer ? '#6d5640' : '#7b6248';
+      ctx.fillRect(x - 1.4 * scale, baseline - treeHeight * 0.34, 2.8 * scale, treeHeight * 0.34 + 2);
+      ctx.fillStyle = canopy[(index + layer) % canopy.length];
       ctx.beginPath();
-      ctx.moveTo(x, groundY + 4);
-      ctx.lineTo(x + sway, groundY + 4 + length);
+      if (kind === 0) {
+        ctx.moveTo(x, baseline - treeHeight * scale);
+        ctx.lineTo(x - treeWidth * scale, baseline - treeHeight * 0.28);
+        ctx.lineTo(x + treeWidth * scale, baseline - treeHeight * 0.28);
+      } else if (kind === 1) {
+        ctx.ellipse(x, baseline - treeHeight * 0.62 * scale, treeWidth * scale, treeHeight * 0.42 * scale, 0, 0, Math.PI * 2);
+        ctx.moveTo(x - treeWidth * 0.72 * scale, baseline - treeHeight * 0.38);
+        ctx.ellipse(x, baseline - treeHeight * 0.46 * scale, treeWidth * 0.82 * scale, treeHeight * 0.28 * scale, 0, 0, Math.PI * 2);
+      } else {
+        ctx.moveTo(x, baseline - treeHeight * scale);
+        ctx.lineTo(x - treeWidth * 0.7 * scale, baseline - treeHeight * 0.48);
+        ctx.lineTo(x - treeWidth * 0.28 * scale, baseline - treeHeight * 0.5);
+        ctx.lineTo(x - treeWidth * scale, baseline - treeHeight * 0.16);
+        ctx.lineTo(x + treeWidth * scale, baseline - treeHeight * 0.16);
+        ctx.lineTo(x + treeWidth * 0.28 * scale, baseline - treeHeight * 0.5);
+        ctx.lineTo(x + treeWidth * 0.7 * scale, baseline - treeHeight * 0.48);
+      }
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawGrass(ctx, width, groundY, height, scrollPixels) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(199,211,144,.45)';
+    ctx.lineWidth = 1.4;
+    const grassSpacing = 14;
+    const grassOffset = positiveModulo(scrollPixels, grassSpacing);
+    for (let x = -grassSpacing; x < width + grassSpacing; x += grassSpacing) {
+      const bladeX = x - grassOffset;
+      const length = 5 + positiveModulo(x * 3, 5);
+      ctx.beginPath();
+      ctx.moveTo(bladeX, groundY + 1);
+      ctx.lineTo(bladeX - 2, groundY + length);
       ctx.stroke();
     }
-    ctx.strokeStyle = 'rgba(218,228,175,.22)';
-    for (let x = 9; x < width; x += 79) {
+    ctx.strokeStyle = 'rgba(232, 214, 150, .28)';
+    ctx.lineWidth = 2;
+    const stripeSpacing = 64;
+    const stripeOffset = positiveModulo(scrollPixels * 1.15, stripeSpacing);
+    for (let x = -stripeSpacing; x < width + stripeSpacing; x += stripeSpacing) {
       ctx.beginPath();
-      ctx.moveTo(x, height * .93);
-      ctx.lineTo(x + 20, height * .925);
+      ctx.moveTo(x - stripeOffset, height * 0.9);
+      ctx.lineTo(x - stripeOffset + 26, height * 0.9);
       ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function formatSceneNumber(value) {
+    return Number.isFinite(value) ? value.toFixed(1) : '—';
+  }
+
+  function drawSensorMarker(ctx, x, y, radius, label) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(28, 18, 8, .28)';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.amber;
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = '#fffaf2';
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(2, radius * 0.28), 0, Math.PI * 2);
+    ctx.fillStyle = '#6a4214';
+    ctx.fill();
+    if (label) {
+      ctx.font = '13px "DM Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      const textWidth = ctx.measureText(label).width;
+      const boxX = x + radius + 6;
+      const boxY = y - 11;
+      ctx.fillStyle = 'rgba(28, 18, 8, .78)';
+      ctx.fillRect(boxX, boxY, textWidth + 10, 22);
+      ctx.fillStyle = '#fff1d9';
+      ctx.fillText(label, boxX + 5, y);
     }
     ctx.restore();
   }
@@ -287,9 +417,9 @@
     ctx.lineTo(x + 4, groundY - 7);
     ctx.stroke();
     ctx.fillStyle = COLORS.green;
-    ctx.font = '7px "DM Mono", monospace';
+    ctx.font = '12px "DM Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('TARGET', x, groundY + 18);
+    ctx.fillText('TARGET', x, groundY + 22);
     ctx.restore();
   }
 
@@ -442,7 +572,7 @@
     const xMin = rawMinX - xPadding;
     const xMax = rawMaxX + xPadding;
     const samples = Array.from({ length: 81 }, (_, index) => {
-      const x = xMin + (xMax - xMin) * index / 80;
+      const x = Number.isFinite(landing) ? landing * index / 80 : xMin + (xMax - xMin) * index / 80;
       return coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
     });
     const minY = Math.min(0, ...points.map((point) => point.y), ...samples);
@@ -450,15 +580,15 @@
     const yPadding = Math.max(1, (maxY - minY) * .13);
     const yMin = minY - yPadding * .15;
     const yMax = maxY + yPadding;
-    const left = 34;
-    const right = width - 9;
-    const top = 7;
-    const bottom = height - 23;
+    const left = 54;
+    const right = width - 14;
+    const top = 12;
+    const bottom = height - 28;
     const mapX = (x) => left + (x - xMin) / (xMax - xMin) * (right - left);
     const mapY = (y) => bottom - (y - yMin) / (yMax - yMin) * (bottom - top);
 
     ctx.clearRect(0, 0, width, height);
-    ctx.font = '8px "DM Mono", monospace';
+    ctx.font = '13px "DM Mono", monospace';
     ctx.lineWidth = 1;
     const yTicks = 4;
     for (let index = 0; index <= yTicks; index += 1) {
@@ -501,7 +631,7 @@
     ctx.save();
     ctx.beginPath();
     for (let index = 0; index <= 140; index += 1) {
-      const x = xMin + (xMax - xMin) * index / 140;
+      const x = Number.isFinite(landing) ? landing * index / 140 : xMin + (xMax - xMin) * index / 140;
       const y = coefficients[0] + x * (coefficients[1] + coefficients[2] * x);
       if (index === 0) ctx.moveTo(mapX(x), mapY(y));
       else ctx.lineTo(mapX(x), mapY(y));
@@ -514,13 +644,13 @@
     ctx.restore();
 
     ctx.beginPath();
-    ctx.arc(mapX(0), mapY(coefficients[0]), 3, 0, Math.PI * 2);
+    ctx.arc(mapX(0), mapY(coefficients[0]), 4.5, 0, Math.PI * 2);
     ctx.fillStyle = '#dffaf1';
     ctx.fill();
     if (options.sensorsVisible !== false) {
       points.forEach(({ x, y }, index) => {
         ctx.beginPath();
-        ctx.arc(mapX(x), mapY(y), 3.6, 0, Math.PI * 2);
+        ctx.arc(mapX(x), mapY(y), 6.5, 0, Math.PI * 2);
         ctx.fillStyle = COLORS.amber;
         ctx.fill();
         ctx.strokeStyle = '#392d25';
@@ -535,7 +665,7 @@
     }
     if (options.landingVisible !== false && Number.isFinite(landing)) {
       ctx.beginPath();
-      ctx.arc(mapX(landing), mapY(0), 4, 0, Math.PI * 2);
+      ctx.arc(mapX(landing), mapY(0), 5, 0, Math.PI * 2);
       ctx.fillStyle = COLORS.green;
       ctx.fill();
       ctx.strokeStyle = '#10342e';
@@ -563,5 +693,5 @@
     return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
   }
 
-  return { prepareCanvas, drawScene, drawGraph };
+  return { prepareCanvas, measureSceneDomain, createSceneViewport, drawScene, drawGraph };
 });

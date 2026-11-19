@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 100" role="img" aria-label="Side view of a small cargo aircraft">
+  <defs>
+    <linearGradient id="fuselage" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#fffdf2"/>
+      <stop offset=".58" stop-color="#e8f0e9"/>
+      <stop offset="1" stop-color="#a9c4c6"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#dce9e4"/>
+      <stop offset="1" stop-color="#8eafb4"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="0" x2="1">
+      <stop offset="0" stop-color="#258c91"/>
+      <stop offset="1" stop-color="#48c1b4"/>
+    </linearGradient>
+  </defs>
+  <g stroke="#52727a" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M38 52 15 43 12 47 28 57 39 61Z" fill="#aac5c5" stroke-width="2"/>
+    <path d="m40 47 7-25 7-3 3 28 25 6-24 5-7 24-7-2 2-23-20-4Z" fill="url(#wing)" stroke-width="2"/>
+    <path d="m84 49 30 3 20 25-12 3-44-24Z" fill="#9bb9bb" stroke-width="1.7"/>
+    <path d="M25 51c9-7 25-10 48-10h100c21 0 35 5 48 10-13 6-28 9-50 9H71c-22 0-36-2-46-9Z" fill="url(#fuselage)" stroke-width="2.3"/>
+    <path d="M31 53h176c-11 5-22 7-41 7H72c-19 0-31-2-41-7Z" fill="url(#teal)" stroke="none"/>
+    <path d="M164 44h20c13 0 23 3 31 7h-52Z" fill="#d5e8e5" stroke-width="1.5"/>
+    <path d="M172 46h13l9 4h-22Z" fill="#397483" stroke="none"/>
+    <path d="M85 43h19l9 3H83Z" fill="#397483" stroke="none"/>
+    <path d="M119 60h25" fill="none" stroke="#e9f4e6" stroke-width="2" opacity=".8"/>
+    <path d="m81 58-4 12m55-10 4 11" fill="none" stroke="#586c6b" stroke-width="2"/>
+    <circle cx="77" cy="72" r="5" fill="#344e59" stroke="#e2e8de" stroke-width="2"/>
+    <circle cx="138" cy="71" r="5" fill="#344e59" stroke="#e2e8de" stroke-width="2"/>
+    <path d="M218 44v16" fill="none" stroke="#48656e" stroke-width="2.4"/>
+    <circle cx="218" cy="52" r="3" fill="#f5f2df" stroke="#48656e" stroke-width="1.5"/>
+    <path d="m44 31 5-8 3 18" fill="#54bdb2" stroke-width="1.8"/>
+    <path d="M29 52c11-6 28-8 48-8" fill="none" stroke="#fff" stroke-width="1.8" opacity=".8"/>
+  </g>
+</svg>

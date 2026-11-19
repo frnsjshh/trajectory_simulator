@@ -1,5 +1,12 @@
-# Optional artwork
+# Replaceable artwork
 
-The simulator draws a side-view aircraft and supply crate directly on Canvas by default, so no image files are required. Use the **Plane image** and **Package image** controls in the dashboard to load local PNG, JPG, WEBP, or SVG sprites (up to 8 MB each); **Reset art** restores the Canvas drawings.
+The default side-view courier and supply crate are original local SVG assets loaded by `js/artwork.js`:
 
-Files placed in this directory are not loaded automatically. To use committed sprites by default, wire their paths into the image initialization in `js/app.js`; the math modules do not depend on artwork.
+- `aircraft/courier.svg` — right-facing civilian cargo aircraft.
+- `package/supply-crate.svg` — high-contrast supply crate.
+
+Replace either file at the same path to change the default artwork. The renderer keeps the source aspect ratio and draws an isolated Canvas fallback if an asset cannot load. Optional PNG, JPG, WEBP, or SVG uploads are still available in the dashboard; **Reset art** restores the default local sprite.
+
+Clouds, mountains, rolling hills, forests, and terrain details are procedurally drawn from deterministic profiles in `js/artwork.js`. Their shapes are lightweight, replaceable components and use the shared simulation clock. Adjust the exported asset paths or layer drawing functions there to customize the landscape; no math module depends on artwork.
+
+All included SVG artwork is original project artwork and has no external runtime or attribution dependency.

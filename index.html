@@ -30,18 +30,28 @@
         <div class="mission-pill"><span class="mission-icon">✳</span><span><b>MISSION 04</b><small>SUPPLY DROP · LIVE MODEL</small></span></div>
       </section>
 
+      <div class="simulation-cockpit" id="simulationCockpit">
       <section class="main-grid" aria-label="Flight simulation and results">
         <div class="scene-card panel">
           <div class="scene-toolbar">
             <div class="scene-heading"><span class="section-kicker">01 / LIVE SIMULATION</span><span class="scene-tag"><span class="live-dot"></span> <span id="sceneStatus">READY FOR DROP</span></span></div>
-            <button class="icon-button" id="sceneFullscreen" type="button" title="Toggle full screen" aria-label="Toggle full screen">⛶</button>
+            <div class="scene-actions"><button class="scene-action" id="presentationOpen" type="button">Explain</button><button class="icon-button" id="sceneFullscreen" type="button" title="Expand simulation cockpit" aria-label="Expand simulation cockpit">⛶</button></div>
           </div>
           <div class="scene-wrap" id="sceneWrap">
             <canvas id="simulationCanvas" aria-label="Side view of the aircraft and predicted supply drop"></canvas>
             <div class="scene-coordinate coordinate-top">ALT <b id="sceneAltitude">45.0</b> m</div>
-            <div class="scene-scale"><span>0 m</span><span class="scale-rule"></span><span id="sceneScaleLabel">3 m</span></div>
+            <div class="scene-scale"><span>Scale</span><span class="scale-rule" id="sceneScaleRule"></span><span id="sceneScaleLabel">— m</span></div>
             <div class="scene-hud"><span class="hud-label">DROP VECTOR</span><strong id="hudLanding">3.00 <small>m</small></strong><span>predicted range</span></div>
             <div class="scene-legend"><span><i class="legend-curve"></i> Predicted path</span><span><i class="legend-point"></i> Sensor points</span></div>
+            <section class="presentation-popup" id="presentationPopup" role="dialog" aria-modal="false" aria-labelledby="presentationTitle" hidden>
+              <div class="presentation-popup-head"><div><span class="section-kicker">06 / PRESENTATION MODE</span><span class="presentation-step" id="presentationStep">Step 1 of 10</span></div><button class="icon-button popup-close" id="presentationClose" type="button" aria-label="Close presentation panel">×</button></div>
+              <div class="presentation-progress"><span id="presentationProgress"></span></div>
+              <h2 id="presentationTitle">Aircraft parameters</h2>
+              <p id="presentationText"></p>
+              <pre class="presentation-context" id="presentationContext"></pre>
+              <p class="presentation-wait" id="presentationWait" role="status" aria-live="polite"></p>
+              <div class="presentation-controls"><button class="button button-quiet" id="presentationPrevious" type="button">← Previous</button><div class="presentation-controls-main"><button class="button button-quiet" id="presentationRestart" type="button">↺ Restart</button><button class="button button-primary" id="presentationPlay" type="button">▶ Play</button><button class="button button-quiet" id="presentationPause" type="button" hidden>Ⅱ Pause</button><button class="button button-primary" id="presentationNext" type="button">Next →</button></div></div>
+            </section>
           </div>
           <div class="flight-console">
             <div class="parameter-controls" aria-label="Aircraft and wind parameters">
@@ -123,11 +133,11 @@
 
       <section class="bottom-grid">
         <article class="panel presentation-panel">
-          <div class="panel-title-row"><div><span class="section-kicker">06 / PRESENTATION MODE</span><h2>Explain as you fly</h2></div><label class="switch-label"><input id="presentationToggle" type="checkbox"><span class="switch"></span><span>Enable</span></label></div>
-          <div class="presentation-content" id="presentationContent"><span class="presentation-step" id="presentationStep">STEP 01</span><p id="presentationText">Three altitude readings are ready. Each sensor contributes one equation to our model.</p><div class="presentation-progress"><span id="presentationProgress"></span></div></div>
+          <div class="panel-title-row"><div><span class="section-kicker">06 / PRESENTATION MODE</span><h2>Explain as you fly</h2></div><label class="switch-label"><input id="presentationToggle" type="checkbox"><span class="switch"></span><span>Open</span></label></div>
+          <p class="panel-subtitle">Opens over the live simulation. Closing it leaves the aircraft and package exactly where they are.</p>
         </article>
         <article class="panel artwork-panel">
-          <div><span class="section-kicker">CUSTOM ARTWORK</span><h2>Make it yours</h2><p class="panel-subtitle">Optional sprites · defaults are drawn on Canvas.</p></div>
+          <div><span class="section-kicker">CUSTOM ARTWORK</span><h2>Make it yours</h2><p class="panel-subtitle">Local courier sprites · Canvas fallbacks · optional uploads.</p></div>
           <div class="artwork-controls">
             <label class="upload-button" for="planeUpload">＋ Plane image<input id="planeUpload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
             <label class="upload-button" for="packageUpload">＋ Package image<input id="packageUpload" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"></label>
@@ -137,11 +147,13 @@
           <p class="artwork-message" id="artworkMessage" role="status" aria-live="polite"></p>
         </article>
       </section>
+      </div>
       <footer class="footer"><span>VECTOR / FLIGHT <i>·</i> LINEAR ALGEBRA LAB</span><span>Built on actual measurements, not guesswork.</span></footer>
     </main>
   </div>
   <script src="js/solver.js"></script>
   <script src="js/trajectory.js"></script>
+  <script src="js/artwork.js"></script>
   <script src="js/visualization.js"></script>
   <script src="js/app.js"></script>
 </body>

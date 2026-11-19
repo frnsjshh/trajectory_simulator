@@ -71,3 +71,15 @@ test('release captures the current aircraft position, package lands after model 
   assert.equal(state.progress, 1);
   assert.equal(state.planeDistance, 90);
 });
+
+test('a landed simulation can pause and resume without moving the landed package or environment clock', () => {
+  let state = transitionSimulation(createSimulationState(), 'start');
+  state = transitionSimulation(state, 'drop');
+  state = advanceSimulation(state, 2, { aircraftSpeed: 30 }, { flightTime: 1 }, 1);
+  assert.equal(state.status, 'LANDED');
+  const paused = transitionSimulation(state, 'pause');
+  assert.equal(paused.status, 'PAUSED');
+  assert.equal(paused.previousState, 'LANDED');
+  assert.deepEqual(advanceSimulation(paused, 1, { aircraftSpeed: 30 }, { flightTime: 1 }, 1), paused);
+  assert.equal(transitionSimulation(paused, 'resume').status, 'LANDED');
+});

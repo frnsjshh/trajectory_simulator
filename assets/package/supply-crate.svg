@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Supply crate marked for delivery">
+  <defs>
+    <linearGradient id="front" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#d9a36c"/>
+      <stop offset="1" stop-color="#a86f43"/>
+    </linearGradient>
+    <linearGradient id="side" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#bb8050"/>
+      <stop offset="1" stop-color="#835638"/>
+    </linearGradient>
+  </defs>
+  <path d="m13 24 22-12h53L67 24Z" fill="#edc58b" stroke="#704d35" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M67 24 88 12v62L67 88Z" fill="url(#side)" stroke="#704d35" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M13 24h54v64H13Z" fill="url(#front)" stroke="#704d35" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M23 25v62m33-62v62M14 41h52m-52 28h52" fill="none" stroke="#805638" stroke-width="2" opacity=".72"/>
+  <path d="M40 43h15v5h-5v15h-5V48h-5Z" fill="#f5f2df"/>
+  <path d="M37 73h19" stroke="#f2d5a5" stroke-width="3" stroke-linecap="round"/>
+  <path d="m19 28 7 3m33 0 5-3" stroke="#f4d8a6" stroke-width="2" opacity=".7"/>
+</svg>
