@@ -1,9 +1,10 @@
 (function (root, factory) {
   const artworkModule = root?.TrajectoryArtwork || (typeof require === 'function' ? require('./artwork') : null);
-  const api = factory(artworkModule);
+  const mathUtils = root?.TrajectoryMathUtils || (typeof require === 'function' ? require('./mathUtils') : null);
+  const api = factory(artworkModule, mathUtils);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TrajectoryVisualization = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (artworkModule) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (artworkModule, mathUtils) {
   'use strict';
 
   const COLORS = { cyan: '#66e4db', amber: '#ffbf78', green: '#83e6b3', ink: '#123346' };
@@ -25,7 +26,31 @@
     return { context, width, height };
   }
 
+  /**
+   * Computes the bounding domain of world coordinates that must be rendered on screen.
+   *
+   * - WHAT IT DOES:
+   *     Measures the minimum and maximum horizontal (x) and vertical (y/altitude) coordinates
+   *     spanned by the aircraft flight, crate release point, sensor markers, parabolic apex, and landing target.
+   *
+   * - HOW IT WORKS:
+   *     Delegates to `mathUtils.measureSceneDomain` to calculate:
+   *       minX, maxX, margin, minimumSpan (170 m), and parabola vertex altitude y_vertex.
+   *
+   * - WHY IT IS USED:
+   *     Enables the adaptive camera to smoothly frame the entire physical experiment without clipping.
+   *
+   * - VARIABLES:
+   *     @param {object} model - Active trajectory model with points, landingX, and coefficients.
+   *     @param {object} [frame={}] - Frame state including aircraft speed and flight parameters.
+   *
+   * - RESULT:
+   *     @returns {{ domainMin: number, domainMax: number, releaseLaneSpan: number, worldDomain: number, minAltitude: number, maxAltitude: number, landingX: number|null }}
+   */
   function measureSceneDomain(model, frame = {}) {
+    if (mathUtils?.measureSceneDomain) {
+      return mathUtils.measureSceneDomain(model, frame);
+    }
     const landingX = Number.isFinite(model?.landingX) ? model.landingX : model?.roots?.positiveRoot;
     const landing = Number.isFinite(landingX) ? landingX : 0;
     const sensorPoints = model?.scenePoints || model?.points || [];
@@ -67,7 +92,37 @@
     };
   }
 
+  /**
+   * Creates the 2D affine transformation camera mapping physical World Coordinates (m)
+   * to HTML5 Canvas Screen Pixel Coordinates (px).
+   *
+   * - WHAT IT DOES:
+   *     Calculates horizontal scale (xScale) and vertical scale (yScale), and establishes
+   *     linear mapping functions `mapWorldX`, `mapSceneX`, and `mapY`.
+   *
+   * - HOW IT WORKS:
+   *     Delegates to `mathUtils.createSceneViewport`:
+   *       s_x = plotWidth / worldDomain
+   *       s_y = (groundY - yTop) / (maxAltitude · 1.16)
+   *       x_{screen} = left + (worldReleaseX + sceneX) · s_x
+   *       y_{screen} = groundY - altitude · s_y  (Inverts y-axis since Canvas y points downward)
+   *
+   * - WHY IT IS USED:
+   *     Maintains visual fidelity, responsiveness, and exact geometric proportions on any screen size.
+   *
+   * - VARIABLES:
+   *     @param {number} width - Canvas display width in pixels.
+   *     @param {number} height - Canvas display height in pixels.
+   *     @param {object} model - Active trajectory model.
+   *     @param {object} [frame={}] - Frame state with camera domain overrides.
+   *
+   * - RESULT:
+   *     @returns {object} Viewport object containing scales, margins, and mapping closures.
+   */
   function createSceneViewport(width, height, model, frame = {}) {
+    if (mathUtils?.createSceneViewport) {
+      return mathUtils.createSceneViewport(width, height, model, frame);
+    }
     const safeWidth = Math.max(1, width);
     const safeHeight = Math.max(1, height);
     const measured = measureSceneDomain(model, frame);
@@ -196,7 +251,17 @@
     return { ...viewport, mapX, mapY };
   }
 
+  /**
+   * Euclidean modulo function ensuring strictly positive remainder in [0, divisor).
+   *
+   * - WHAT IT DOES: Computes positive periodic wrap for animation offsets.
+   * - HOW IT WORKS: Delegates to `mathUtils.positiveModulo(value, divisor)`.
+   * - FORMULA: ((value % divisor) + divisor) % divisor
+   */
   function positiveModulo(value, divisor) {
+    if (mathUtils?.positiveModulo) {
+      return mathUtils.positiveModulo(value, divisor);
+    }
     return ((value % divisor) + divisor) % divisor;
   }
 

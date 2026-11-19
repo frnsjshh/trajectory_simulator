@@ -1,83 +1,89 @@
+/**
+ * ============================================================================
+ * VECTOR / FLIGHT — LINEAR ALGEBRA SOLVER MODULE (solver.js)
+ * ============================================================================
+ *
+ * This module provides the linear algebra solver for the Trajectory Simulator.
+ * It implements Gauss–Jordan elimination with partial pivoting to solve the
+ * linear system A · X = B for polynomial curve fitting.
+ *
+ * ARCHITECTURAL ROLE:
+ * Delegates its core mathematical computations to the dedicated mathematical
+ * engine in `mathUtils.js` while maintaining full backward compatibility with
+ * existing tests and legacy script references.
+ *
+ * ============================================================================
+ */
+
 (function (root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  if (root) root.TrajectorySolver = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+  const mathUtils = typeof module === 'object' && module.exports
+    ? require('./mathUtils.js')
+    : root?.TrajectoryMathUtils;
+  const api = factory(mathUtils);
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
+  }
+  if (root) {
+    root.TrajectorySolver = api;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (mathUtils) {
   'use strict';
 
-  const DEFAULT_TOLERANCE = 1e-12;
-
-  function cloneMatrix(matrix) {
-    return matrix.map((row) => row.slice());
+  /**
+   * Solves a system of linear equations A · X = B using Gauss–Jordan elimination
+   * with partial pivoting, producing Reduced Row Echelon Form (RREF) and an audit trail.
+   *
+   * - WHAT IT DOES:
+   *     Solves the matrix equation A · X = B, transforming the augmented matrix [A | B]
+   *     into Reduced Row Echelon Form [I | X], where I is the identity matrix and X is
+   *     the solution vector containing the quadratic trajectory coefficients [a₀, a₁, a₂]ᵀ.
+   *
+   * - HOW IT WORKS:
+   *     1. Creates augmented matrix [A | B] of size n × (n + 1).
+   *     2. For each column k (0 to n - 1):
+   *        a. Partial Pivoting: Selects row p ≥ k with largest absolute entry |A_{p, k}|.
+   *        b. Swap: Exchanges Row k and Row p if p ≠ k (R_k ↔ R_p).
+   *        c. Normalization: Divides Row k by pivot A_{k, k} (R_k ← (1 / A_{k, k}) R_k).
+   *        d. Elimination: For all other rows i ≠ k, subtracts A_{i, k} · R_k (R_i ← R_i - A_{i, k} R_k).
+   *     3. Cleans near-zero numerical residuals and extracts column n as vector X.
+   *
+   * - WHY IT IS USED:
+   *     To reconstruct the supply crate's parabolic trajectory equation y(x) = a₀ + a₁x + a₂x²
+   *     from 3 sensor measurement coordinates without assuming prior knowledge of aircraft speed
+   *     or gravity. The step-by-step audit trail enables visual demonstration in the presentation mode.
+   *
+   * - VARIABLES:
+   *     @param {number[][]} coefficients - Square n × n coefficient matrix A (e.g. Vandermonde matrix).
+   *     @param {number[]} values - Right-hand side n-dimensional vector B (e.g. measured altitudes).
+   *     @param {number} [tolerance=1e-12] - Minimum absolute value threshold for pivot selection.
+   *
+   * - RESULT:
+   *     @returns {{ rref: number[][], solution: number[], steps: Array<{label: string, operation: string, matrix: number[][]}> }}
+   *       - `rref`: Reduced row echelon form matrix [I | X].
+   *       - `solution`: Vector X = [a₀, a₁, a₂]ᵀ.
+   *       - `steps`: Step-by-step row operation history for interactive UI playback.
+   *
+   * - MATHEMATICAL FORMULA:
+   *     [A | B] = [
+   *       [ 1   x₀   x₀²  |  y₀ ]
+   *       [ 1   x₁   x₁²  |  y₁ ]
+   *       [ 1   x₂   x₂²  |  y₂ ]
+   *     ] ⟶
+   *     [I | X] = [
+   *       [ 1   0    0   |  a₀ ]
+   *       [ 0   1    0   |  a₁ ]
+   *       [ 0   0    1   |  a₂ ]
+   *     ]
+   */
+  function solveLinearSystem(coefficients, values, tolerance) {
+    if (mathUtils && typeof mathUtils.solveLinearSystem === 'function') {
+      return mathUtils.solveLinearSystem(coefficients, values, tolerance);
+    }
+    throw new Error('TrajectoryMathUtils module is required for linear system solving.');
   }
 
-  function solveLinearSystem(coefficients, values, tolerance = DEFAULT_TOLERANCE) {
-    if (!Array.isArray(coefficients) || !Array.isArray(values) || coefficients.length === 0) {
-      throw new Error('Provide a non-empty square coefficient matrix and a matching value vector.');
-    }
-    const size = coefficients.length;
-    if (values.length !== size || coefficients.some((row) => !Array.isArray(row) || row.length !== size)) {
-      throw new Error('The coefficient matrix must be square and match the value vector length.');
-    }
-    if (!Number.isFinite(tolerance) || tolerance <= 0) throw new Error('Solver tolerance must be a positive finite number.');
-
-    const augmented = coefficients.map((row, index) => {
-      const augmentedRow = row.concat(values[index]);
-      if (augmentedRow.some((value) => !Number.isFinite(value))) {
-        throw new Error('All matrix values must be valid finite numbers.');
-      }
-      return augmentedRow;
-    });
-    const steps = [{ label: 'Starting augmented matrix', operation: 'Initial matrix', matrix: cloneMatrix(augmented) }];
-
-    const record = (label, operation) => steps.push({ label, operation, matrix: cloneMatrix(augmented) });
-    const formatRow = (row) => `R${row + 1}`;
-
-    for (let column = 0; column < size; column += 1) {
-      let pivotRow = column;
-      for (let candidate = column + 1; candidate < size; candidate += 1) {
-        if (Math.abs(augmented[candidate][column]) > Math.abs(augmented[pivotRow][column])) pivotRow = candidate;
-      }
-      const columnScale = Math.max(1, ...augmented.slice(column).map((row) => Math.abs(row[column])));
-      const threshold = tolerance * columnScale;
-      if (Math.abs(augmented[pivotRow][column]) <= threshold) {
-        throw new Error(`The sensor matrix is singular or ill-conditioned near column ${column + 1}. Use three distinct x-values with a wider spread.`);
-      }
-
-      if (pivotRow !== column) {
-        [augmented[column], augmented[pivotRow]] = [augmented[pivotRow], augmented[column]];
-        record(`Swap ${formatRow(column)} ↔ ${formatRow(pivotRow)}`, `${formatRow(column)} ↔ ${formatRow(pivotRow)} (partial pivoting)`);
-      }
-
-      const pivot = augmented[column][column];
-      if (Math.abs(pivot - 1) > threshold) {
-        for (let entry = 0; entry <= size; entry += 1) augmented[column][entry] /= pivot;
-        record(`Normalize ${formatRow(column)}`, `${formatRow(column)} → ${formatRow(column)} ÷ ${formatNumber(pivot)}`);
-      }
-
-      for (let row = 0; row < size; row += 1) {
-        if (row === column) continue;
-        const factor = augmented[row][column];
-        if (Math.abs(factor) <= threshold) {
-          augmented[row][column] = 0;
-          continue;
-        }
-        for (let entry = 0; entry <= size; entry += 1) augmented[row][entry] -= factor * augmented[column][entry];
-        augmented[row][column] = 0;
-        record(`Eliminate column ${column + 1} in ${formatRow(row)}`, `${formatRow(row)} → ${formatRow(row)} − (${formatNumber(factor)})${formatRow(column)}`);
-      }
-    }
-
-    const clean = (value) => Math.abs(value) <= tolerance * 10 ? 0 : value;
-    const rref = augmented.map((row) => row.map(clean));
-    if (rref.flat().some((value) => !Number.isFinite(value))) throw new Error('The solver produced a non-finite result; check the scale of the sensor values.');
-    if (steps.length) steps[steps.length - 1].matrix = cloneMatrix(rref);
-    return { rref, solution: rref.map((row) => row[size]), steps };
-  }
-
-  function formatNumber(value) {
-    return Number(value.toPrecision(5)).toString();
-  }
-
-  return { solveLinearSystem };
+  return {
+    solveLinearSystem
+  };
 });

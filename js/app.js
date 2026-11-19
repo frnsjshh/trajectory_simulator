@@ -1,11 +1,12 @@
 (function (root, factory) {
   const math = typeof module === 'object' && module.exports ? require('./trajectory.js') : root.TrajectoryMath;
   const visualization = typeof module === 'object' && module.exports ? require('./visualization.js') : root.TrajectoryVisualization;
-  const api = factory(math, visualization);
+  const mathUtils = typeof module === 'object' && module.exports ? require('./mathUtils.js') : root.TrajectoryMathUtils;
+  const api = factory(math, visualization, mathUtils);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TrajectoryApp = api;
   if (root?.document) api.init();
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (math, visualization) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (math, visualization, mathUtils) {
   'use strict';
 
   const DEFAULT_POINTS = [{ x: 0, y: 45 }, { x: 1, y: 40 }, { x: 2, y: 25 }];
@@ -182,14 +183,30 @@
       return flightParameters;
     }
 
+    /**
+     * Updates camera world bounds with exponential decay smoothing.
+     *
+     * - What it does: Smoothly transitions the camera domain boundaries to frame the flight.
+     * - How it works: Uses asymptotic convergence v(t + Δt) = v(t) + (v_target - v(t)) · (1 - e^(-k · Δt)).
+     * - Variables:
+     *     @param {object} activeModel - Solved trajectory model.
+     *     @param {object} parameters - Aircraft flight settings.
+     *     @param {number} delta - Frame delta time in seconds.
+     */
     function updateCamera(activeModel, parameters, delta) {
       const target = visualization.measureSceneDomain(activeModel, { parameters });
       if (!camera) camera = { domainMin: target.domainMin, domainMax: target.domainMax, maxAltitude: target.maxAltitude };
       if (simulation.status === 'READY' && delta > 0) {
-        const blend = 1 - Math.exp(-6 * delta);
-        camera.domainMin += (target.domainMin - camera.domainMin) * blend;
-        camera.domainMax += (target.domainMax - camera.domainMax) * blend;
-        camera.maxAltitude += (target.maxAltitude - camera.maxAltitude) * blend;
+        if (mathUtils?.exponentialDecayBlend) {
+          camera.domainMin = mathUtils.exponentialDecayBlend(camera.domainMin, target.domainMin, 6, delta);
+          camera.domainMax = mathUtils.exponentialDecayBlend(camera.domainMax, target.domainMax, 6, delta);
+          camera.maxAltitude = mathUtils.exponentialDecayBlend(camera.maxAltitude, target.maxAltitude, 6, delta);
+        } else {
+          const blend = 1 - Math.exp(-6 * delta);
+          camera.domainMin += (target.domainMin - camera.domainMin) * blend;
+          camera.domainMax += (target.domainMax - camera.domainMax) * blend;
+          camera.maxAltitude += (target.maxAltitude - camera.maxAltitude) * blend;
+        }
       }
       return camera;
     }
@@ -205,7 +222,16 @@
       return Number.isFinite(value) ? value.toFixed(digits) : '—';
     }
 
+    /**
+     * Calculates rounded ruler intervals (1, 2, or 5 × 10ⁿ) for the distance scale.
+     *
+     * - What it does: Quantizes pixel-measured distances into clean round meter increments.
+     * - How it works: Delegates to `mathUtils.niceScaleTick`.
+     */
     function niceScaleTick(rawDistance) {
+      if (mathUtils?.niceScaleTick) {
+        return mathUtils.niceScaleTick(rawDistance);
+      }
       if (!Number.isFinite(rawDistance) || rawDistance <= 0) return 1;
       const magnitude = 10 ** Math.floor(Math.log10(rawDistance));
       const fraction = rawDistance / magnitude;
@@ -213,7 +239,13 @@
       return preferred * magnitude;
     }
 
+    /**
+     * Formats polynomial coefficients into a clean presentation string y = a₀ + a₁x + a₂x².
+     */
     function polynomialText(coefficients, variable = 'x') {
+      if (mathUtils?.formatPolynomialText) {
+        return mathUtils.formatPolynomialText(coefficients, variable);
+      }
       const [a0, a1, a2] = coefficients;
       const terms = [formatNumber(a0)];
       [[a1, variable], [a2, `${variable}²`]].forEach(([coefficient, suffix]) => {
@@ -336,7 +368,17 @@
       });
     }
 
+    /**
+     * Determines whether the fitted trajectory is physically valid for flight.
+     *
+     * - What it does: Validates presence of forward landing root, positive release altitude,
+     *   and ensures the trajectory does not cross below ground level before landing.
+     * - How it works: Delegates to `mathUtils.validateFlightPath(nextModel)`.
+     */
     function makeFlightVerdict(nextModel) {
+      if (mathUtils?.validateFlightPath) {
+        return mathUtils.validateFlightPath(nextModel);
+      }
       const rootX = Number.isFinite(nextModel.landingX) ? nextModel.landingX : nextModel.roots.positiveRoot;
       if (rootX === null || !Number.isFinite(rootX)) return { valid: false, reason: nextModel.roots.reason || 'No forward landing point.' };
       if (nextModel.coefficients[0] <= 0) return { valid: false, reason: 'Release altitude must be above ground level.' };

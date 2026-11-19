@@ -1,143 +1,200 @@
+/**
+ * ============================================================================
+ * VECTOR / FLIGHT — TRAJECTORY & KINEMATICS MODULE (trajectory.js)
+ * ============================================================================
+ *
+ * This module coordinates the trajectory simulation, projectile physics,
+ * quadratic polynomial fitting, and root-finding routines.
+ *
+ * ARCHITECTURAL ROLE:
+ * Delegates its mathematical operations to the dedicated mathematical engine
+ * in `mathUtils.js` while maintaining full backward compatibility with
+ * existing tests and legacy script references.
+ *
+ * ============================================================================
+ */
+
 (function (root, factory) {
-  const solver = typeof module === 'object' && module.exports ? require('./solver.js') : root.TrajectorySolver;
-  const api = factory(solver);
-  if (typeof module === 'object' && module.exports) module.exports = api;
-  if (root) root.TrajectoryMath = api;
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (solver) {
+  'use strict';
+  const mathUtils = typeof module === 'object' && module.exports
+    ? require('./mathUtils.js')
+    : root?.TrajectoryMathUtils;
+  const api = factory(mathUtils);
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
+  }
+  if (root) {
+    root.TrajectoryMath = api;
+  }
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (mathUtils) {
   'use strict';
 
+  if (!mathUtils) {
+    throw new Error('TrajectoryMathUtils module must be loaded before trajectory.js.');
+  }
+
+  /**
+   * Evaluates a quadratic polynomial P(x) = a₀ + a₁x + a₂x² using Horner's method.
+   *
+   * - WHAT IT DOES:
+   *     Computes the altitude y at any given horizontal distance x (or time t).
+   *
+   * - HOW IT WORKS:
+   *     Uses nested multiplication: P(x) = a₀ + x · (a₁ + a₂ · x).
+   *     Reduces floating point arithmetic operations from 3 multiplications to 2.
+   *
+   * - WHY IT IS USED:
+   *     Provides fast, accurate altitude evaluation along the parabolic path.
+   *
+   * - VARIABLES:
+   *     @param {number[]} coefficients - Polynomial coefficients [a₀, a₁, a₂].
+   *     @param {number} x - Independent evaluation point (horizontal distance in meters or elapsed time in seconds).
+   *
+   * - RESULT:
+   *     @returns {number} Evaluated altitude y.
+   *
+   * - MATHEMATICAL FORMULA:
+   *     P(x) = a₀ + x(a₁ + a₂ x)
+   */
   function evaluate(coefficients, x) {
-    const [a0, a1, a2] = coefficients;
-    return a0 + x * (a1 + a2 * x);
+    return mathUtils.evaluate(coefficients, x);
   }
 
-  function findPositiveRoot(coefficients, tolerance = 1e-12) {
-    const [a0, a1, a2] = coefficients;
-    const scale = Math.max(1, Math.abs(a0), Math.abs(a1), Math.abs(a2));
-    if (Math.abs(a2) <= tolerance * scale) {
-      if (Math.abs(a1) <= tolerance * scale) return { roots: [], positiveRoot: null, reason: 'The altitude equation has no forward x-intercept.' };
-      const rootValue = -a0 / a1;
-      return { roots: [rootValue], positiveRoot: rootValue > tolerance ? rootValue : null, reason: rootValue > tolerance ? null : 'The only x-intercept is not in the forward direction.' };
-    }
-
-    let discriminant = a1 * a1 - 4 * a2 * a0;
-    const discTolerance = tolerance * Math.max(1, a1 * a1, Math.abs(4 * a2 * a0));
-    if (discriminant < -discTolerance) return { roots: [], positiveRoot: null, reason: 'This polynomial has no real ground intersection.' };
-    if (discriminant < 0) discriminant = 0;
-    const squareRoot = Math.sqrt(discriminant);
-    // This form avoids cancellation when the linear and square-root terms nearly match.
-    const q = -0.5 * (a1 + (a1 >= 0 ? squareRoot : -squareRoot));
-    const roots = q === 0 ? [-a1 / (2 * a2)] : [q / a2, a0 / q];
-    const uniqueRoots = roots.filter((value, index) => Number.isFinite(value) && roots.findIndex((other) => Math.abs(other - value) <= tolerance * Math.max(1, Math.abs(value))) === index).sort((left, right) => left - right);
-    const positiveRoot = uniqueRoots.find((value) => value > tolerance) ?? null;
-    return {
-      roots: uniqueRoots,
-      positiveRoot,
-      reason: positiveRoot === null ? 'No positive x-intercept is available for a forward landing.' : null
-    };
+  /**
+   * Solves for real roots of the quadratic equation a₀ + a₁x + a₂x² = 0,
+   * isolating the forward landing point using the numerically stable Citardauq formula.
+   *
+   * - WHAT IT DOES:
+   *     Calculates the ground impact location where altitude y = 0.
+   *
+   * - HOW IT WORKS:
+   *     Uses the Citardauq formulation:
+   *       q = -½ · [ a₁ + sgn(a₁) · √(a₁² - 4a₂a₀) ]
+   *       x₁ = q / a₂,   x₂ = a₀ / q
+   *     This avoids catastrophic cancellation when 4a₂a₀ ≪ a₁².
+   *
+   * - WHY IT IS USED:
+   *     Predicts exactly where the dropped crate will land without relying on idealized physics formulas.
+   *
+   * - VARIABLES:
+   *     @param {number[]} coefficients - [a₀, a₁, a₂].
+   *     @param {number} [tolerance=1e-12] - Zero-detection threshold.
+   *
+   * - RESULT:
+   *     @returns {{ roots: number[], positiveRoot: number|null, reason: string|null }}
+   *
+   * - MATHEMATICAL FORMULA:
+   *     Δ = a₁² - 4a₂a₀
+   *     q = -½(a₁ + sgn(a₁)√Δ)
+   *     roots = { q / a₂, a₀ / q }
+   */
+  function findPositiveRoot(coefficients, tolerance) {
+    return mathUtils.findPositiveRoot(coefficients, tolerance);
   }
 
+  /**
+   * Fits a unique quadratic polynomial through exactly three distinct sensor points.
+   *
+   * - WHAT IT DOES:
+   *     Constructs the 3×3 Vandermonde matrix and solves A · X = B for X = [a₀, a₁, a₂]ᵀ.
+   *
+   * - HOW IT WORKS:
+   *     Validates 3 distinct x-coordinates, forms [A | B] where row i is [1, xᵢ, xᵢ² | yᵢ],
+   *     and solves via Gauss–Jordan elimination with partial pivoting.
+   *
+   * - WHY IT IS USED:
+   *     Serves as the central linear algebra concept: interpolating discrete sensor data
+   *     into a continuous projectile trajectory.
+   *
+   * - VARIABLES:
+   *     @param {Array<{x: number, y: number}>} sensorPoints - Three measured coordinate points.
+   *
+   * - RESULT:
+   *     @returns {object} Fitted model with coefficients, matrix, rref, and roots.
+   */
   function fitQuadratic(sensorPoints) {
-    if (!Array.isArray(sensorPoints) || sensorPoints.length !== 3) {
-      throw new Error('Quadratic interpolation requires exactly three sensor points. Extra points are not silently ignored.');
-    }
-    const points = sensorPoints.map((point, index) => {
-      const x = Number(point.x);
-      const y = Number(point.y);
-      if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error(`Sensor ${index + 1} must contain finite numeric x and y values.`);
-      return { x, y };
-    });
-    for (let left = 0; left < points.length; left += 1) {
-      for (let right = left + 1; right < points.length; right += 1) {
-        if (points[left].x === points[right].x) throw new Error('Sensor x-values must be distinct for quadratic interpolation.');
-      }
-    }
-    const matrix = points.map(({ x }) => [1, x, x * x]);
-    if (matrix.flat().some((value) => !Number.isFinite(value))) throw new Error('Sensor distances are too large to construct a finite coefficient matrix.');
-    const solved = solver.solveLinearSystem(matrix, points.map(({ y }) => y));
-    const coefficients = solved.solution;
-    if (coefficients.some((value) => !Number.isFinite(value))) throw new Error('The fitted coefficients are outside the numeric range.');
-    return { points, matrix, values: points.map(({ y }) => y), coefficients, roots: findPositiveRoot(coefficients), ...solved };
+    return mathUtils.fitQuadratic(sensorPoints);
   }
 
-  function generatePhysicsModel(parameters = {}) {
-    const aircraftSpeed = Number(parameters.aircraftSpeed ?? parameters.speed ?? 60);
-    const altitude = Number(parameters.altitude ?? 90);
-    const gravity = Number(parameters.gravity ?? 9.81);
-    const windEnabled = Boolean(parameters.windEnabled);
-    const windSpeed = windEnabled ? Number(parameters.windSpeed ?? 0) : 0;
-    const windDirection = parameters.windDirection === 'headwind' ? 'headwind' : 'tailwind';
-    if (!Number.isFinite(aircraftSpeed) || aircraftSpeed <= 0) throw new Error('Aircraft speed must be a positive finite number.');
-    if (!Number.isFinite(altitude) || altitude <= 0) throw new Error('Release altitude must be a positive finite number.');
-    if (!Number.isFinite(gravity) || gravity <= 0) throw new Error('Gravity must be a positive finite number.');
-    if (!Number.isFinite(windSpeed) || windSpeed < 0 || windSpeed > 20) throw new Error('Wind speed must be between 0 and 20 m/s.');
-
-    const signedWindSpeed = windEnabled ? (windDirection === 'headwind' ? -windSpeed : windSpeed) : 0;
-    const effectiveHorizontalSpeed = aircraftSpeed + signedWindSpeed;
-    const flightTime = Math.sqrt(2 * altitude / gravity);
-    const basis = Math.abs(effectiveHorizontalSpeed) < 1e-10 ? 'time' : 'distance';
-    const fractions = [0.2, 0.5, 0.8];
-    const sampleTimes = fractions.map((fraction) => fraction * flightTime);
-    const points = sampleTimes.map((time) => ({
-      x: basis === 'time' ? time : effectiveHorizontalSpeed * time,
-      y: altitude - 0.5 * gravity * time * time
-    }));
-    const solved = fitQuadratic(points);
-    const landingTime = basis === 'time'
-      ? solved.roots.positiveRoot
-      : flightTime;
-    const expectedLandingX = effectiveHorizontalSpeed * flightTime;
-    const landingX = basis === 'time'
-      ? 0
-      : solved.roots.roots.find((value) => Math.sign(value) === Math.sign(expectedLandingX)) ?? null;
-    if (landingTime === null || landingX === null) throw new Error('The reconstructed polynomial has no landing root in the physical travel direction.');
-
-    return {
-      ...solved,
-      basis,
-      axisLabel: basis === 'time' ? 'time (s)' : 'horizontal distance (m)',
-      gravity,
-      releaseAltitude: altitude,
-      aircraftSpeed,
-      windEnabled,
-      windSpeed,
-      windDirection,
-      signedWindSpeed,
-      effectiveHorizontalSpeed,
-      flightTime,
-      landingTime,
-      landingX,
-      landingDistance: Math.abs(landingX),
-      scenePoints: points.map((point) => ({ x: basis === 'time' ? 0 : point.x, y: point.y }))
-    };
+  /**
+   * Generates a physical simulation model from flight parameters, creates 3 synthetic sensor
+   * readings using kinematics, and reconstructs the polynomial via Gauss–Jordan elimination.
+   *
+   * - WHAT IT DOES:
+   *     Simulates the flight: computes flight time t_f = √(2h / g), horizontal speed v_{eff} = v_{aircraft} + v_{wind},
+   *     samples 3 sensor coordinates at t = [0.2, 0.5, 0.8] · t_f, and invokes `fitQuadratic`.
+   *
+   * - HOW IT WORKS:
+   *     x(t) = (v_{aircraft} + v_{wind}) · t
+   *     y(t) = h - ½ · g · t²
+   *     Reconstructed polynomial: y(x) = h - [g / (2 · v_{eff}²)] · x²
+   *
+   * - WHY IT IS USED:
+   *     Connects the physical flight controls (speed, altitude, wind) to the linear algebra solver.
+   *
+   * - VARIABLES:
+   *     @param {object} [parameters={}] - Aircraft speed, altitude, gravity, wind speed/direction.
+   *
+   * - RESULT:
+   *     @returns {object} Trajectory model with coefficients, landing point, and step history.
+   */
+  function generatePhysicsModel(parameters) {
+    return mathUtils.generatePhysicsModel(parameters);
   }
 
+  /**
+   * Computes crate position (x, y) at elapsed time t using the solved polynomial.
+   *
+   * - WHAT IT DOES:
+   *     Determines crate coordinates at time `elapsed` during descent.
+   *
+   * - VARIABLES:
+   *     @param {object} model - Trajectory model.
+   *     @param {number} elapsed - Seconds elapsed since release.
+   *
+   * - RESULT:
+   *     @returns {{ x: number, y: number, time: number, modelX: number }}
+   */
   function positionAtTime(model, elapsed) {
-    const flightTime = model.flightTime;
-    const time = Math.min(flightTime, Math.max(0, Number.isFinite(elapsed) ? elapsed : 0));
-    const atLanding = time >= flightTime;
-    if (model.basis === 'time') {
-      return { x: 0, y: atLanding ? 0 : evaluate(model.coefficients, time), time, modelX: time };
-    }
-    const x = atLanding ? model.landingX : model.effectiveHorizontalSpeed * time;
-    return { x, y: atLanding ? 0 : evaluate(model.coefficients, x), time, modelX: x };
+    return mathUtils.positionAtTime(model, elapsed);
   }
 
-  function sampleTrajectory(coefficients, endX, count = 80) {
-    if (!Number.isFinite(endX) || endX < 0) return [];
-    const safeCount = Math.max(2, Math.floor(count));
-    return Array.from({ length: safeCount + 1 }, (_, index) => {
-      const x = endX * index / safeCount;
-      return { x, y: evaluate(coefficients, x) };
-    });
+  /**
+   * Discretizes the trajectory curve into an array of points for rendering.
+   *
+   * - VARIABLES:
+   *     @param {number[]} coefficients - [a₀, a₁, a₂].
+   *     @param {number} endX - Terminal horizontal distance.
+   *     @param {number} [count=80] - Number of segments.
+   *
+   * - RESULT:
+   *     @returns {Array<{x: number, y: number}>}
+   */
+  function sampleTrajectory(coefficients, endX, count) {
+    return mathUtils.sampleTrajectory(coefficients, endX, count);
   }
 
+  /**
+   * Returns trajectory position at a normalized progress fraction [0, 1].
+   *
+   * - VARIABLES:
+   *     @param {object} model - Trajectory model.
+   *     @param {number} progress - Progress fraction from 0.0 to 1.0.
+   *
+   * - RESULT:
+   *     @returns {{ x: number, y: number, progress: number }}
+   */
   function trajectoryPosition(model, progress) {
-    const clampedProgress = Math.min(1, Math.max(0, Number.isFinite(progress) ? progress : 0));
-    const landing = model.roots.positiveRoot;
-    const x = landing === null ? 0 : landing * clampedProgress;
-    return { x, y: clampedProgress === 1 && landing !== null ? 0 : evaluate(model.coefficients, x), progress: clampedProgress };
+    return mathUtils.trajectoryPosition(model, progress);
   }
 
-  return { evaluate, findPositiveRoot, fitQuadratic, generatePhysicsModel, positionAtTime, sampleTrajectory, trajectoryPosition };
+  return {
+    evaluate,
+    findPositiveRoot,
+    fitQuadratic,
+    generatePhysicsModel,
+    positionAtTime,
+    sampleTrajectory,
+    trajectoryPosition
+  };
 });

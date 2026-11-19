@@ -27,7 +27,8 @@ Quadratic interpolation requires exactly three distinct finite x-values. Extra m
 
 ## Files
 
-- `js/solver.js` — manually implemented Gauss–Jordan elimination with partial pivoting and row-operation snapshots.
+- `js/mathUtils.js` — centralized, dedicated mathematics engine containing matrix operations, Gauss–Jordan elimination, vector algebra, kinematics, polynomial fitting, numerical root finding, and 2D affine coordinate projections.
+- `js/solver.js` — linear algebra solver module providing backward-compatible interface and Gauss–Jordan row-operation snapshots.
 - `js/trajectory.js` — automatic physics sensor generation, interpolation matrix construction, polynomial evaluation, directional roots, and time-based package positions.
 - `js/artwork.js` — replaceable local plane/crate sprites, Canvas fallbacks, and lightweight, deterministic cloud/mountain/forest/terrain parallax layers.
 - `js/visualization.js` — responsive Canvas scene, shared world-to-screen camera, adaptive route bounds, sensor/landing overlays, synchronized scene/graph, wind arrows, and impact effect.
