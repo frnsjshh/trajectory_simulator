@@ -85,15 +85,14 @@
     const yScale = (groundY - yTop) / (Math.max(10, maxAltitude) * 1.16);
     const phase = frame.state === 'PAUSED' ? frame.previousState : frame.state;
     const released = phase === 'FALLING' || phase === 'LANDED';
-    const planeDistance = Math.max(0, Number(frame.planeDistance) || 0);
     const releaseDistance = Math.max(0, Number(frame.releasePlaneDistance) || 0);
-    const releaseOffset = positiveModulo(released ? releaseDistance : planeDistance, measured.releaseLaneSpan);
+    const releaseOffset = released ? releaseDistance : 0;
     const worldReleaseX = releaseOffset - domainMin;
     const mapWorldX = (worldX) => left + worldX * xScale;
     const mapSceneX = (sceneX) => mapWorldX(worldReleaseX + sceneX);
     const mapY = (altitude) => groundY - altitude * yScale;
     const planeWorldX = released
-      ? positiveModulo(worldReleaseX + Math.max(0, planeDistance - releaseDistance), worldDomain)
+      ? worldReleaseX + Math.max(0, (Number(frame.planeDistance) || 0) - releaseDistance)
       : worldReleaseX;
     return {
       left, right, yTop, groundY, xScale, yScale, worldDomain, worldReleaseX, domainMin, domainMax,
@@ -106,7 +105,7 @@
     const prepared = prepareCanvas(canvas);
     if (!prepared) return null;
     const { context: ctx, width, height } = prepared;
-    const { model, time = 0, state = 'READY', previousState = 'READY', planeDistance = 0, releasePlaneDistance = 0, trajectoryVisible = true, sensorsVisible = true, sensorLabelsVisible = false, landingVisible = true, windIndicatorsVisible = false, parameters = {}, packagePosition = { x: 0, y: 0 }, planeImage = null, packageImage = null, impactTime = 0 } = frame;
+    const { model, time = 0, sceneryTime = 0, sceneryDistance = 0, state = 'READY', previousState = 'READY', planeDistance = 0, releasePlaneDistance = 0, trajectoryVisible = true, sensorsVisible = true, sensorLabelsVisible = false, landingVisible = true, windIndicatorsVisible = false, parameters = {}, packagePosition = { x: 0, y: 0 }, planeImage = null, packageImage = null, impactTime = 0 } = frame;
     const visualState = state === 'PAUSED' ? previousState : state;
     const coefficients = model?.coefficients || [0, 0, 0];
     const viewport = createSceneViewport(width, height, model, frame);
@@ -114,9 +113,9 @@
     const mapX = mapSceneX;
     const sensorPoints = model?.scenePoints || model?.points || [];
     const released = visualState === 'FALLING' || visualState === 'LANDED';
-    const scrollMeters = Math.max(0, Number(planeDistance) || 0);
-    artwork?.drawEnvironment(ctx, width, height, time, scrollMeters * xScale);
-    if (windIndicatorsVisible && parameters.windSpeed > 0) drawWindIndicators(ctx, width, height, time, parameters.windDirection, parameters.windSpeed);
+    const scrollMeters = Math.max(0, Number(sceneryDistance) || 0);
+    artwork?.drawEnvironment(ctx, width, height, sceneryTime, scrollMeters * xScale);
+    if (windIndicatorsVisible && parameters.windSpeed > 0) drawWindIndicators(ctx, width, height, sceneryTime, parameters.windDirection, parameters.windSpeed);
 
     if (trajectoryVisible && Number.isFinite(landingX)) {
       ctx.save();
@@ -172,7 +171,7 @@
     }
 
     const propellerAngle = time * 22;
-    artwork?.drawAircraft(ctx, planeImage, planeX, planeY + Math.sin(time * 2.4) * 1.5, spriteScale, propellerAngle);
+    artwork?.drawAircraft(ctx, planeImage, planeX, planeY, spriteScale, propellerAngle);
     if (!released) {
       artwork?.drawPackage(ctx, packageImage, planeX, releaseY, 0, spriteScale);
     } else if (Number.isFinite(landingX)) {

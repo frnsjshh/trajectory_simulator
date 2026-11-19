@@ -31,10 +31,11 @@ test('scene camera maps release, sensors, fitted curve, and target through one b
 
 test('signed and vertical flights remain on-screen and the release coordinate stays fixed after dropping', () => {
   const vertical = generatePhysicsModel({ aircraftSpeed: 20, altitude: 120, windEnabled: true, windSpeed: 20, windDirection: 'headwind' });
-  const ready = viewportFor(640, 360, vertical, { planeDistance: 35 });
-  const falling = viewportFor(640, 360, vertical, { state: 'FALLING', planeDistance: 35, releasePlaneDistance: 35 });
+  const ready = viewportFor(640, 360, vertical);
+  const falling = viewportFor(640, 360, vertical, { state: 'FALLING', planeDistance: 20, releasePlaneDistance: 0 });
   assert.equal(vertical.landingX, 0);
   assert.equal(ready.originX, falling.mapSceneX(0));
+  assert.ok(falling.planeX > falling.originX);
 
   const leftward = generatePhysicsModel({ aircraftSpeed: 10, altitude: 120, windEnabled: true, windSpeed: 20, windDirection: 'headwind' });
   const leftView = viewportFor(640, 360, leftward);
@@ -43,17 +44,18 @@ test('signed and vertical flights remain on-screen and the release coordinate st
   assert.ok(leftView.mapSceneX(leftward.landingX) <= leftView.right);
 });
 
-test('aircraft visibly advances before release and loops after landing without shifting the drop anchor', () => {
+test('aircraft stays anchored before release, then flies right off-screen without wrapping', () => {
   const model = generatePhysicsModel({ aircraftSpeed: 60, altitude: 90 });
   const initial = viewportFor(900, 480, model);
   const flying = viewportFor(900, 480, model, { state: 'FLYING', planeDistance: 30 });
-  assert.ok(flying.originX > initial.originX, 'the attached crate and predicted release must advance with the plane');
-  assert.equal(flying.planeX, flying.originX);
-  const dropping = viewportFor(900, 480, model, { state: 'FALLING', planeDistance: 30, releasePlaneDistance: 30 });
-  assert.equal(dropping.originX, flying.originX, 'release must not move the crate or curve');
-  const landed = viewportFor(900, 480, model, { state: 'LANDED', planeDistance: 10000, releasePlaneDistance: 30 });
-  assert.equal(landed.originX, dropping.originX, 'the landed crate and target remain fixed');
-  assert.ok(landed.planeX >= landed.left && landed.planeX <= landed.right, 'the plane must keep looping on screen');
+  assert.equal(flying.originX, initial.originX, 'the scenery movement must not move the aircraft or attached crate');
+  assert.equal(flying.planeX, initial.planeX);
+  const dropping = viewportFor(900, 480, model, { state: 'FALLING', planeDistance: 30, releasePlaneDistance: 0 });
+  assert.equal(dropping.originX, flying.originX, 'release must not move the crate or predicted curve');
+  assert.ok(dropping.planeX > dropping.originX, 'the aircraft starts moving right after release');
+  const landed = viewportFor(900, 480, model, { state: 'LANDED', planeDistance: 10000, releasePlaneDistance: 0 });
+  assert.equal(landed.originX, dropping.originX, 'the package and target stay fixed while the aircraft leaves');
+  assert.ok(landed.planeX > landed.right, 'the aircraft continues right until it exits the viewport');
 });
 
 test('manual quadratic peaks between sensors are included in camera bounds', () => {

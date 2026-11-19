@@ -68,7 +68,7 @@
   }
 
   function createSimulationState() {
-    return { status: 'READY', previousState: 'READY', progress: 0, planeProgress: 0, releasePlaneProgress: 0, planeDistance: 0, releasePlaneDistance: 0, flightElapsed: 0, time: 0, autoDropElapsed: 0, impactTime: 0 };
+    return { status: 'READY', previousState: 'READY', progress: 0, planeProgress: 0, releasePlaneProgress: 0, planeDistance: 0, releasePlaneDistance: 0, sceneryDistance: 0, sceneryTime: 0, flightElapsed: 0, time: 0, autoDropElapsed: 0, impactTime: 0 };
   }
 
   function transitionSimulation(current, action) {
@@ -113,12 +113,18 @@
     const elapsed = Math.max(0, Number.isFinite(deltaSeconds) ? deltaSeconds : 0) * Math.max(0, Number.isFinite(simulationSpeed) ? simulationSpeed : 1);
     if (elapsed === 0) return state;
     state.time += elapsed;
-    if (state.status === 'FLYING' || state.status === 'FALLING' || state.status === 'LANDED') {
-      const aircraftSpeed = Math.max(0, Number(parameters?.aircraftSpeed) || 0);
+    const aircraftSpeed = Math.max(0, Number(parameters?.aircraftSpeed) || 0);
+    if (state.status === 'READY' || state.status === 'FLYING') {
+      state.sceneryDistance += aircraftSpeed * elapsed;
+      state.sceneryTime += elapsed;
+    }
+    if (state.status === 'FLYING') {
+      state.planeProgress += elapsed;
+      state.autoDropElapsed += elapsed;
+    } else if (state.status === 'FALLING' || state.status === 'LANDED') {
       state.planeDistance += aircraftSpeed * elapsed;
       state.planeProgress += elapsed;
     }
-    if (state.status === 'FLYING') state.autoDropElapsed += elapsed;
     if (state.status === 'FALLING') {
       state.flightElapsed += elapsed;
       const duration = Math.max(Number.EPSILON, Number(model?.flightTime) || 0);
@@ -427,7 +433,7 @@
       if (index === 0) return model.isManual
         ? `Manual interpolation · fitted release altitude ${formatFixed(model.releaseAltitude, 1)} m. Flight controls do not generate these readings.`
         : `Aircraft ${formatFixed(parameters.aircraftSpeed, 1)} m/s · release altitude ${formatFixed(model.releaseAltitude, 1)} m · wind ${wind}.`;
-      if (index === 1) return `Aircraft speed: ${formatFixed(parameters.aircraftSpeed, 1)} m/s. Scene status: ${simulation.status.toLowerCase()}.`;
+      if (index === 1) return `The aircraft stays fixed on screen at ${formatFixed(parameters.aircraftSpeed, 1)} m/s; the scenery scrolls until release. Scene status: ${simulation.status.toLowerCase()}.`;
       if (index === 2) return `Release coordinate: ${formatFixed(simulation.releasePlaneDistance, 1)} m along the aircraft’s flight; fitted drop duration ${formatFixed(model.flightTime, 2)} s.`;
       if (index === 3) return model.points.map((point, pointIndex) => `S${pointIndex + 1} (${formatFixed(point.x, 3)}, ${formatFixed(point.y, 3)})`).join(' · ');
       if (index === 4) return model.matrix.map((row, rowIndex) => `[${row.map((value) => formatFixed(value, 3)).join(', ')} | ${formatFixed(model.values[rowIndex], 3)}]`).join('\n');
@@ -647,6 +653,8 @@
       const frame = {
         model: activeModel,
         time: simulation.time,
+        sceneryTime: simulation.sceneryTime,
+        sceneryDistance: simulation.sceneryDistance,
         state: simulation.status,
         previousState: simulation.previousState,
         progress: simulation.progress,
